@@ -184,6 +184,15 @@ def game_preview_json(game_id):
     return jason
 
 
+def team_roster_json(team_id):
+    url = BASE_URL + f"/api/v1/teams/{team_id}/roster"
+    print(url)
+    time.sleep(.1)
+    response = requests.get(url)
+    jason = response.json()
+    return jason
+
+
 def player_info_json(player_id):
     url = BASE_URL + f"/api/v1/people/{player_id}"
     print(url)
@@ -586,3 +595,20 @@ def update_completed_game_table(g_id):
     g.save()
 
     update_at_bats_table(g_id)
+
+
+def update_team_roster(team_object):
+    team_id = team_object.team_id
+    roster_json = team_roster_json(team_id)['roster']
+
+    # take all players with current team listed and remove this team from them
+    players_prev_on_team = MlbPlayer.objects.filter(current_team=team_object)
+    for player in players_prev_on_team:
+        player.current_team = team_object
+        player.save()
+
+    # take all players on api roster and add team as current team - keeps list updated
+    for player in roster_json:
+        obj = MlbPlayer.objects.get(player_id=player['person']['id'])
+        obj.current_team = team_object
+        obj.save()

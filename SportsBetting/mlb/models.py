@@ -50,6 +50,8 @@ class MlbPlayer(BaseModel):
     position_type = models.CharField(max_length=20, blank=True, null=True)
     position_abbreviation = models.CharField(max_length=20, blank=True, null=True)
     active = models.BooleanField(blank=True, null=True)
+    current_team = models.ForeignKey('MlbTeam', on_delete=models.CASCADE, default=None,
+                                     related_name='players_current_team', blank=True, null=True)
     last_updated = models.DateTimeField(blank=True, null=True)
 
 
@@ -153,7 +155,7 @@ class MlbUpcomingPlayers(BaseModel):
 class MlbPlayerSimulations(BaseModel):
     player = models.ForeignKey('MlbPlayer', on_delete=models.CASCADE,
                                related_name='simulated_player', blank=True, null=True)
-    game = models.IntegerField(blank=True, null=True)
+    game_id = models.IntegerField(blank=True, null=True)
     game_date = models.DateField(blank=True, null=True)
     statistic = models.TextField(blank=True, null=True)
     time_frame = models.IntegerField(blank=True, null=True)
@@ -177,36 +179,16 @@ class MlbPlayerSimulations(BaseModel):
 class MlbBovadaUpcomingPitchers(BaseModel):
     player_id = models.IntegerField(blank=True, null=True)
     player_name = models.TextField(blank=True, null=True)
-    strikeout_over_line = models.FloatField(blank=True, null=True)
-    strikeout_under_line = models.FloatField(blank=True, null=True)
-    strikeout_over_odds = models.IntegerField(blank=True, null=True)
-    strikeout_under_odds = models.IntegerField(blank=True, null=True)
-    walks_over_line = models.FloatField(blank=True, null=True)
-    walks_under_line = models.FloatField(blank=True, null=True)
-    walks_over_odds = models.IntegerField(blank=True, null=True)
-    walks_under_odds = models.IntegerField(blank=True, null=True)
-    pitching_out_over_line = models.FloatField(blank=True, null=True)
-    pitching_out_under_line = models.FloatField(blank=True, null=True)
-    pitching_out_over_odds = models.IntegerField(blank=True, null=True)
-    pitching_out_under_odds = models.IntegerField(blank=True, null=True)
-    earned_runs_over_line = models.FloatField(blank=True, null=True)
-    earned_runs_under_line = models.FloatField(blank=True, null=True)
-    earned_runs_over_odds = models.IntegerField(blank=True, null=True)
-    earned_runs_under_odds = models.IntegerField(blank=True, null=True)
-    hits_allowed_over_line = models.FloatField(blank=True, null=True)
-    hits_allowed_under_line = models.FloatField(blank=True, null=True)
-    hits_allowed_over_odds = models.IntegerField(blank=True, null=True)
-    hits_allowed_under_odds = models.IntegerField(blank=True, null=True)
+    stat = models.TextField(blank=True, null=True)
+    over_line = models.FloatField(blank=True, null=True)
+    under_line = models.FloatField(blank=True, null=True)
+    over_odds = models.IntegerField(blank=True, null=True)
+    under_odds = models.IntegerField(blank=True, null=True)
 
 
 class MlbBovadaUpcomingBatters(BaseModel):
     player_id = models.IntegerField(blank=True, null=True)
     player_name = models.TextField(blank=True, null=True)
-    player_bov_id = models.IntegerField(blank=True, null=True)
-    home_run_odds = models.IntegerField(blank=True, null=True)
-    home_run_twice_odds = models.IntegerField(blank=True, null=True)
-    steal_base_odds = models.IntegerField(blank=True, null=True)
-    record_hit_odds = models.IntegerField(blank=True, null=True)
-    record_rbi_odds = models.IntegerField(blank=True, null=True)
-    two_bases_odds = models.IntegerField(blank=True, null=True)
-    three_bases_odds = models.IntegerField(blank=True, null=True)
+    stat = models.TextField(blank=True, null=True)
+    over_line = models.FloatField(blank=True, null=True)
+    odds = models.IntegerField(blank=True, null=True)

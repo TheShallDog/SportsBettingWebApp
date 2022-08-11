@@ -5,6 +5,8 @@ from .models import MlbPlayer
 from .models import MlbBovadaUpcomingPitchers
 from .models import MlbUpcomingPlayers
 from .models import MlbTeam
+from .models import MlbBovadaUpcomingBatters
+from .import update_mlb_data
 
 
 def refresh_bov_mlb_upcoming_games():
@@ -18,16 +20,21 @@ def refresh_bov_mlb_upcoming_games():
         print(teams)
         game_id = match_game_id(start_time_unix, teams)
         pitchers = get_pitcher_names(event)
+        print(pitchers)
         pitcher_data = []
         for pitcher in pitchers:
-            temp_data = get_pitcher_data(pitcher, event)
-            reconciled_data = reconcile_bov_players(temp_data, teams, game_id)
-            pitcher_data.append(reconciled_data)
+            temp_data_li = get_pitcher_data(pitcher, event)
 
-        for p in pitcher_data:
-            print(p)
+            reconciled_data_li = []
+            for temp_data in temp_data_li:
+                reconciled_data = reconcile_bov_players(temp_data, teams, game_id)
+                reconciled_data_li.append(reconciled_data)
+            pitcher_data.append(reconciled_data_li)
 
         update_bovada_upcoming_pitchers_table(pitcher_data)
+
+        batter_data = get_batter_data(event, teams)
+        update_bovada_upcoming_batters_table(batter_data)
 
 
 def bov_game_events_json(league_json_url):
@@ -51,7 +58,8 @@ def bov_game_events_json(league_json_url):
         print(temp_link_complete)
         temp_json = temp_response.json()[0]
         league_games_json.append(temp_json['events'][0])
-        # break  # TODO this makes it go just once for testing purposes
+        if x == 2:
+            break  # TODO this makes it go just once for testing purposes
 
     return league_games_json
 
@@ -60,9 +68,11 @@ def get_teams(event_json):
     team_info = {}
     for team in event_json['competitors']:
         if bool(team['home']):
-            team_info.update({'home': team['name']})
+            team_info.update({'home': team['name'],
+                              'home_id': match_team(team['name'])})
         else:
-            team_info.update({'away': team['name']})
+            team_info.update({'away': team['name'],
+                              'away_id': match_team(team['name'])})
 
     return team_info
 
@@ -70,35 +80,141 @@ def get_teams(event_json):
 def get_pitcher_names(event_json):
     pitchers = []
     for team in event_json['competitors']:
-        pitchers.append(team['pitcher']['name'])
+        try:
+            pitchers.append(team['pitcher']['name'])
+        except KeyError:
+            print("No probable pitchers named by bovada yet")
     return pitchers
 
 
-def get_pitcher_data(pitcher, event_json):
-    pitcher_data_di = {'player_id': None,
-                       'player_name': pitcher,
-                       'strikeout_over_line': None,
-                       'strikeout_under_line': None,
-                       'strikeout_over_odds': None,
-                       'strikeout_under_odds': None,
-                       'walks_over_line': None,
-                       'walks_under_line': None,
-                       'walks_over_odds': None,
-                       'walks_under_odds': None,
-                       'pitching_out_over_line': None,
-                       'pitching_out_under_line': None,
-                       'pitching_out_over_odds': None,
-                       'pitching_out_under_odds': None,
-                       'earned_runs_over_line': None,
-                       'earned_runs_under_line': None,
-                       'earned_runs_over_odds': None,
-                       'earned_runs_under_odds': None,
-                       'hits_allowed_over_line': None,
-                       'hits_allowed_under_line': None,
-                       'hits_allowed_over_odds': None,
-                       'hits_allowed_under_odds': None,
-                       }
+def get_batter_data(event_json, teams):
+    for prop in event_json['displayGroups']:
+        if prop['description'] == 'Player Props':
 
+            batter_data_di_li = []
+
+            for market in prop['markets']:
+
+                if 'Player to hit a Home Run' in market['description']:
+                    stat = 'homerun'
+                    over_line = .5
+
+                    for outcome in market['outcomes']:
+
+                        batter_name = outcome['description']
+                        odds = outcome['price']['american']
+                        batter_data_di_li.append({'stat': stat,
+                                                  'over_line': over_line,
+                                                  'player_name': outcome['description'],
+                                                  'player_id': match_player(batter_name, teams),
+                                                  'odds': odds})
+
+                if 'Steal a Base' in market['description']:
+                    stat = 'stolen_base'
+                    over_line = .5
+
+                    for outcome in market['outcomes']:
+
+                        batter_name = outcome['description']
+                        odds = outcome['price']['american']
+                        batter_data_di_li.append({'stat': stat,
+                                                  'over_line': over_line,
+                                                  'player_name': outcome['description'],
+                                                  'player_id': match_player(batter_name, teams),
+                                                  'odds': odds})
+
+                elif 'Record a Hit' in market['description']:
+                    stat = 'hit'
+                    over_line = .5
+
+                    for outcome in market['outcomes']:
+
+                        batter_name = outcome['description']
+                        odds = outcome['price']['american']
+                        batter_data_di_li.append({'stat': stat,
+                                                  'over_line': over_line,
+                                                  'player_name': batter_name,
+                                                  'player_id': match_player(batter_name, teams),
+                                                  'odds': odds})
+
+                elif 'Record a Run' in market['description']:
+                    stat = 'run'
+                    over_line = .5
+
+                    for outcome in market['outcomes']:
+
+                        batter_name = outcome['description']
+                        odds = outcome['price']['american']
+                        batter_data_di_li.append({'stat': stat,
+                                                  'over_line': over_line,
+                                                  'player_name': batter_name,
+                                                  'player_id': match_player(batter_name, teams),
+                                                  'odds': odds})
+
+                elif 'Record an RBI' in market['description']:
+                    stat = 'rbi'
+                    over_line = .5
+
+                    for outcome in market['outcomes']:
+
+                        batter_name = outcome['description']
+                        odds = outcome['price']['american']
+                        batter_data_di_li.append({'stat': stat,
+                                                  'over_line': over_line,
+                                                  'player_name': batter_name,
+                                                  'player_id': match_player(batter_name, teams),
+                                                  'odds': odds})
+
+                elif 'Player to Hit 2+ Home Runs' in market['description']:
+                    stat = 'homerun'
+                    over_line = 1.5
+
+                    for outcome in market['outcomes']:
+
+                        batter_name = outcome['description']
+                        odds = outcome['price']['american']
+                        batter_data_di_li.append({'stat': stat,
+                                                  'over_line': over_line,
+                                                  'player_name': batter_name,
+                                                  'player_id': match_player(batter_name, teams),
+                                                  'odds': odds})
+
+                elif 'Player to Record 2+ Total Bases' in market['description']:
+                    stat = 'bases'
+                    over_line = 1.5
+
+                    for outcome in market['outcomes']:
+
+                        batter_name = outcome['description']
+                        odds = outcome['price']['american']
+                        batter_data_di_li.append({'stat': stat,
+                                                  'over_line': over_line,
+                                                  'player_name': batter_name,
+                                                  'player_id': match_player(batter_name, teams),
+                                                  'odds': odds})
+
+                elif 'Player to Record 3+ Total Bases' in market['description']:
+                    stat = 'bases'
+                    over_line = 2.5
+
+                    for outcome in market['outcomes']:
+
+                        batter_name = outcome['description']
+                        odds = outcome['price']['american']
+                        batter_data_di_li.append({'stat': stat,
+                                                  'over_line': over_line,
+                                                  'player_name': batter_name,
+                                                  'player_id': match_player(batter_name, teams),
+                                                  'odds': odds})
+
+            return batter_data_di_li
+
+    return []
+
+
+def get_pitcher_data(pitcher, event_json):
+
+    pitcher_data_di_li = []
     for prop in event_json['displayGroups']:
 
         if prop['description'] == 'Pitcher Props':
@@ -107,76 +223,94 @@ def get_pitcher_data(pitcher, event_json):
 
                 if pitcher in market['description']:
 
+                    pitcher_data_di = {'player_id': None,
+                                       'player_name': pitcher,
+                                       'stat': None,
+                                       'over_line': None,
+                                       'under_line': None,
+                                       'over_odds': None,
+                                       'under_odds': None,
+                                       }
+
                     if 'Total Strikeouts' in market['description']:
+                        pitcher_data_di.update({'stat': 'strikeout'})
                         for outcome in market['outcomes']:
                             match outcome['description']:
                                 case 'Over':
                                     pitcher_data_di.update(
-                                        {'strikeout_over_line': outcome['price']['handicap']})
+                                        {'over_line': outcome['price']['handicap']})
                                     pitcher_data_di.update(
-                                        {'strikeout_over_odds': check_even_odds(outcome['price']['american'])})
+                                        {'over_odds': check_even_odds(outcome['price']['american'])})
                                 case 'Under':
                                     pitcher_data_di.update(
-                                        {'strikeout_under_line': outcome['price']['handicap']})
+                                        {'under_line': outcome['price']['handicap']})
                                     pitcher_data_di.update(
-                                        {'strikeout_under_odds': check_even_odds(outcome['price']['american'])})
+                                        {'under_odds': check_even_odds(outcome['price']['american'])})
 
                     elif 'Total Walks' in market['description']:
+                        pitcher_data_di.update({'stat': 'walks'})
                         for outcome in market['outcomes']:
                             match outcome['description']:
                                 case 'Over':
                                     pitcher_data_di.update(
-                                        {'walks_over_line': outcome['price']['handicap']})
+                                        {'over_line': outcome['price']['handicap']})
                                     pitcher_data_di.update(
-                                        {'walks_over_odds': check_even_odds(outcome['price']['american'])})
+                                        {'over_odds': check_even_odds(outcome['price']['american'])})
                                 case 'Under':
                                     pitcher_data_di.update(
-                                        {'walks_under_line': outcome['price']['handicap']})
+                                        {'under_line': outcome['price']['handicap']})
                                     pitcher_data_di.update(
-                                        {'walks_under_odds': check_even_odds(outcome['price']['american'])})
+                                        {'under_odds': check_even_odds(outcome['price']['american'])})
 
                     elif 'Total Pitching Outs' in market['description']:
+                        pitcher_data_di.update({'stat': 'pitching_outs'})
                         for outcome in market['outcomes']:
                             match outcome['description']:
                                 case 'Over':
                                     pitcher_data_di.update(
-                                        {'pitching_out_over_line': outcome['price']['handicap']})
+                                        {'over_line': outcome['price']['handicap']})
                                     pitcher_data_di.update(
-                                        {'pitching_out_over_odds': check_even_odds(outcome['price']['american'])})
+                                        {'over_odds': check_even_odds(outcome['price']['american'])})
                                 case 'Under':
                                     pitcher_data_di.update(
-                                        {'pitching_out_under_line': outcome['price']['handicap']})
+                                        {'under_line': outcome['price']['handicap']})
                                     pitcher_data_di.update(
-                                        {'pitching_out_under_odds': check_even_odds(outcome['price']['american'])})
+                                        {'under_odds': check_even_odds(outcome['price']['american'])})
 
                     elif 'Total Earned Runs' in market['description']:
+                        pitcher_data_di.update({'stat': 'earned_runs'})
                         for outcome in market['outcomes']:
                             match outcome['description']:
                                 case 'Over':
                                     pitcher_data_di.update(
-                                        {'earned_runs_over_line': outcome['price']['handicap']})
+                                        {'over_line': outcome['price']['handicap']})
                                     pitcher_data_di.update(
-                                        {'earned_runs_over_odds': check_even_odds(outcome['price']['american'])})
+                                        {'over_odds': check_even_odds(outcome['price']['american'])})
                                 case 'Under':
                                     pitcher_data_di.update(
-                                        {'earned_runs_under_line': outcome['price']['handicap']})
+                                        {'under_line': outcome['price']['handicap']})
                                     pitcher_data_di.update(
-                                        {'earned_runs_under_odds': check_even_odds(outcome['price']['american'])})
+                                        {'under_odds': check_even_odds(outcome['price']['american'])})
 
                     elif 'Total Hits Allowed' in market['description']:
+                        pitcher_data_di.update({'stat': 'hits_allowed'})
                         for outcome in market['outcomes']:
                             match outcome['description']:
                                 case 'Over':
                                     pitcher_data_di.update(
-                                        {'hits_allowed_over_line': outcome['price']['handicap']})
+                                        {'over_line': outcome['price']['handicap']})
                                     pitcher_data_di.update(
-                                        {'hits_allowed_over_odds': check_even_odds(outcome['price']['american'])})
+                                        {'over_odds': check_even_odds(outcome['price']['american'])})
                                 case 'Under':
                                     pitcher_data_di.update(
-                                        {'hits_allowed_under_line': outcome['price']['handicap']})
+                                        {'under_line': outcome['price']['handicap']})
                                     pitcher_data_di.update(
-                                        {'hits_allowed_under_odds': check_even_odds(outcome['price']['american'])})
-    return pitcher_data_di
+                                        {'under_odds': check_even_odds(outcome['price']['american'])})
+
+                    pitcher_data_di_li.append(pitcher_data_di)
+                    print(pitcher_data_di)
+
+    return pitcher_data_di_li
 
 
 def check_even_odds(odds):
@@ -187,8 +321,8 @@ def check_even_odds(odds):
 
 
 def match_game_id(start_time_unix, teams):
-    home_team_id = match_team_di(teams['home'])
-    away_team_id = match_team_di(teams['away'])
+    home_team_id = match_team(teams['home'])
+    away_team_id = match_team(teams['away'])
 
     query_set = MlbUpcomingGames.objects.filter(home_team_id=home_team_id).filter(away_team_id=away_team_id)
 
@@ -197,9 +331,39 @@ def match_game_id(start_time_unix, teams):
     return game_id
 
 
-def match_team_di(team_name):
-    team_id = MlbTeam.objects.get(name=team_name).team_id
+def match_team(team_name):
+    team_object = MlbTeam.objects.get(name=team_name)
+    team_id = team_object.team_id
+    update_mlb_data.update_team_roster(team_object)
     return team_id
+
+
+def match_player(name, teams):
+    home_team_id = teams['home_id']
+    away_team_id = teams['away_id']
+    name_split = name.split(' ')
+    first_name = strip_accents(name_split[0])
+    last_name = strip_accents(name_split[1])
+    if len(last_name) <= 2 and "." in last_name:
+        last_name = strip_accents(name_split[2])
+
+    query_set_active = MlbPlayer.objects.filter(active=True)
+    query_set_teams = query_set_active.filter(current_team=home_team_id) | \
+                      query_set_active.filter(current_team=away_team_id)
+    query_set = query_set_teams.filter(last_name=last_name)
+
+    player_id = None
+    if len(query_set) == 1:
+        player_id = query_set[0].player_id
+
+    elif len(query_set) > 1:
+        query_set = query_set.filter(first_name=first_name)
+        if len(query_set) == 1:
+            player_id = query_set[0].player_id
+        else:
+            player_id = None
+
+    return player_id
 
 
 def reconcile_bov_players(player_data, teams, game_id):
@@ -207,16 +371,25 @@ def reconcile_bov_players(player_data, teams, game_id):
     name_split = player_name.split(' ')
     first_name = strip_accents(name_split[0])
     last_name = strip_accents(name_split[1])
+    home_team_id = match_team(teams['home'])
+    away_team_id = match_team(teams['away'])
 
-    # mlb upcoming players doesn't update with pitchers
-    query_set = MlbPlayer.objects.filter(active=True).filter(position_abbreviation='P')\
-        .filter(first_name=first_name).filter(last_name=last_name)
+    query_set_active = MlbPlayer.objects.filter(active=True)
+    query_set_teams = query_set_active(current_team=home_team_id) | query_set_active(current_team=away_team_id)
+    query_set = query_set_teams.filter(position_abbreviation='P').filter(last_name=last_name)
 
     if len(query_set) == 1:
         player_id = query_set[0].player_id
         player_data.update({'player_id': player_id,
                             'first_name': first_name,
                             'last_name': last_name})
+    elif len(query_set) > 1:
+        query_set = query_set.filter(first_name=first_name)
+        player_id = query_set[0].player_id
+        player_data.update({'player_id': player_id,
+                            'first_name': first_name,
+                            'last_name': last_name})
+
     return player_data
 
 
@@ -228,30 +401,27 @@ def strip_accents(text):
 
 
 def update_bovada_upcoming_pitchers_table(pitcher_data):
-    for d in pitcher_data:
-        row = MlbBovadaUpcomingPitchers(player_id=d['player_id'],
-                                        player_name=d['player_name'],
-                                        strikeout_over_line=d['strikeout_over_line'],
-                                        strikeout_under_line=d['strikeout_under_line'],
-                                        strikeout_over_odds=d['strikeout_over_odds'],
-                                        strikeout_under_odds=d['strikeout_under_odds'],
-                                        walks_over_line=d['walks_over_line'],
-                                        walks_under_line=d['walks_under_line'],
-                                        walks_over_odds=d['walks_over_odds'],
-                                        walks_under_odds=d['walks_under_odds'],
-                                        pitching_out_over_line=d['pitching_out_over_line'],
-                                        pitching_out_under_line=d['pitching_out_under_line'],
-                                        pitching_out_over_odds=d['pitching_out_over_odds'],
-                                        pitching_out_under_odds=d['pitching_out_under_odds'],
-                                        earned_runs_over_line=d['earned_runs_over_line'],
-                                        earned_runs_under_line=d['earned_runs_under_line'],
-                                        earned_runs_over_odds=d['earned_runs_over_odds'],
-                                        earned_runs_under_odds=d['earned_runs_under_odds'],
-                                        hits_allowed_over_line=d['hits_allowed_over_line'],
-                                        hits_allowed_under_line=d['hits_allowed_under_line'],
-                                        hits_allowed_over_odds=d['hits_allowed_over_odds'],
-                                        hits_allowed_under_odds=d['hits_allowed_under_odds'],
-                                        )
+    for p_recon_data in pitcher_data:
+        for d in p_recon_data:
+            row = MlbBovadaUpcomingPitchers(player_id=d['player_id'],
+                                            player_name=d['player_name'],
+                                            stat=d['stat'],
+                                            over_line=d['over_line'],
+                                            under_line=d['under_line'],
+                                            over_odds=d['over_odds'],
+                                            under_odds=d['under_odds'],
+                                            )
+            row.save()
+
+
+def update_bovada_upcoming_batters_table(batter_data):
+    for d in batter_data:
+        row = MlbBovadaUpcomingBatters(player_id=d['player_id'],
+                                       player_name=d['player_name'],
+                                       stat=d['stat'],
+                                       over_line=d['over_line'],
+                                       odds=check_even_odds(d['odds']),
+                                       )
         row.save()
 
 

@@ -3,20 +3,24 @@ from .models import MlbPlayer
 from .models import MlbAtBat
 from .models import MlbGame
 from .models import MlbPlayerSimulations
+from .models import MlbBovadaUpcomingBatters
+from .models import MlbBovadaUpcomingPitchers
 import math
 import statistics
 import pickle
 
 
 def get_upcoming_pitchers():
-    # TODO should probably make this come from Bovada data
-    away_probable_pitchers = MlbUpcomingGames.objects.values_list('away_probable_pitcher_id', flat=True)
-    home_probable_pitchers = MlbUpcomingGames.objects.values_list('home_probable_pitcher_id', flat=True)
-    probable_pitchers = list(away_probable_pitchers) + list(home_probable_pitchers)
-    probable_pitchers = list(set(probable_pitchers))  # remove duplicates
+    probable_pitchers = MlbBovadaUpcomingPitchers.objects.values_list('player_id', flat=True).distinct()
     probable_pitchers = list(filter(None, probable_pitchers))  # remove None values
-    probable_pitchers = [542881, 506433]  # TODO remove line after testing and have come from bovada list
     return probable_pitchers
+
+
+def get_upcoming_batters():
+    probable_batters = MlbBovadaUpcomingBatters.objects.values_list('player_id', flat=True).distinct()
+    probable_batters = list(filter(None, probable_batters))  # remove None values
+    print(probable_batters)
+    return probable_batters
 
 
 def get_time_frames(input_list):
@@ -24,7 +28,7 @@ def get_time_frames(input_list):
     if list_length < 10:
         return False
 
-    max_sims = int(math.floor(list_length/2))
+    max_sims = int(math.floor(list_length / 2))
     temp_length = 5
     time_frames = []
     while temp_length < max_sims:
@@ -37,8 +41,8 @@ def get_time_frames(input_list):
 
 
 def mp_prepare_upcoming_player_data():
-    probable_pitchers = get_upcoming_pitchers()
-    batters = []  # [642715, 670712]  test with just pitchers first # - turn into a method called get_upcoming_players
+    probable_pitchers = []  # get_upcoming_pitchers() - temporary for improvement
+    batters = get_upcoming_batters()
 
     processed_pitchers = []
     for p in probable_pitchers:
@@ -46,7 +50,70 @@ def mp_prepare_upcoming_player_data():
 
     flat_list = flatten_list(processed_pitchers)
 
+    processed_batters = process_batters(batters)
+
     return flat_list
+
+
+def process_batters(batters):
+
+    batter_pre_sim_complete_di_li = []
+
+    for batter in batters:
+        print(MlbPlayer.objects.get(pk=batter).full_name)
+        player_name = MlbBovadaUpcomingBatters.objects.filter(player_id=batter)[0].player_name
+        print(player_name)
+
+        # get queryset of games where they have an at_bat in order of most recent first
+        at_bats_played_qs = MlbAtBat.objects.filter(batter_id=batter) | \
+                            MlbAtBat.objects.filter(scoring_player_1=batter) | \
+                            MlbAtBat.objects.filter(scoring_player_2=batter) | \
+                            MlbAtBat.objects.filter(scoring_player_3=batter) | \
+                            MlbAtBat.objects.filter(scoring_player_4=batter) | \
+                            MlbAtBat.objects.filter(base_stealer_1=batter) | \
+                            MlbAtBat.objects.filter(base_stealer_2=batter) | \
+                            MlbAtBat.objects.filter(base_stealer_3=batter)
+
+        print(len(MlbAtBat.objects.filter(batter_id=batter)))  # quick check to see if there is a difference
+        print(len(at_bats_played_qs))
+        played_game_ids_qs = at_bats_played_qs.values_list('game_id', flat=True).distinct()
+        played_games_ordered_qs = MlbGame.objects.filter(pk__in=played_game_ids_qs).order_by('-game_date')
+
+        # turn the queryset into an ordered list
+        ordered_game_ids_li = []
+        for game in played_games_ordered_qs:
+            ordered_game_ids_li.append(game.game_id)
+
+        # get all batting stat categories to bet on for this batter and make into a text list
+        stats_qs = MlbBovadaUpcomingBatters.objects.filter(player_id=batter).values_list('stat', flat=True).distinct()
+        stats = []
+        for stat in stats_qs:
+            stats.append(stat)
+
+        stat_filters = ['none', 'home', 'away']
+
+        temp_di = {'player_id': batter,
+                   'player_name': player_name,
+                   'ordered_game_ids': ordered_game_ids_li,
+                   'stats': stats,
+                   'stat_filters': stat_filters}
+
+        print(temp_di)
+
+        # this method will return a list of dictionaries containing the full stats for each stat and filter by game
+        processed_batter_stats_di_li = process_batter_stats(temp_di)
+
+        print(processed_batter_stats_di_li[0])
+        print(processed_batter_stats_di_li[1])
+
+        # this method expands on the previous to break them down by individual timeframes
+        # and with their respective values
+        batter_pre_sim_complete_di_li = process_batter_timeframes(processed_batter_stats_di_li)
+
+        print(batter_pre_sim_complete_di_li[0])
+        print(batter_pre_sim_complete_di_li[1])
+
+    return batter_pre_sim_complete_di_li
 
 
 def flatten_list(list_of_lists):
@@ -81,6 +148,167 @@ def process_pitchers(pitcher):
     return processed_info
 
 
+def process_batter_stats(batter_di):
+    batter_id = batter_di['player_id']
+
+    processed_batter_stats = []
+    print(batter_di['stats'])
+
+    for stat in batter_di['stats']:
+
+        for stat_filter in batter_di['stat_filters']:
+            ordered_games_by_filter_li = []
+            ordered_cumulative_stat_by_filter_li = []
+
+            for game_id in batter_di['ordered_game_ids']:
+
+                at_bats_in_game = MlbAtBat.objects.filter(game_id=game_id)
+
+                # query set that includes every at bat, that was impacted by the batter in this game
+                the_qs = at_bats_in_game.filter(batter_id=batter_id) | \
+                         at_bats_in_game.filter(scoring_player_1=batter_id) | \
+                         at_bats_in_game.filter(scoring_player_2=batter_id) | \
+                         at_bats_in_game.filter(scoring_player_3=batter_id) | \
+                         at_bats_in_game.filter(scoring_player_4=batter_id) | \
+                         at_bats_in_game.filter(base_stealer_1=batter_id) | \
+                         at_bats_in_game.filter(base_stealer_2=batter_id) | \
+                         at_bats_in_game.filter(base_stealer_3=batter_id)
+
+                # check if this game was home or away for the batter, home bats second in each inning
+                current_game_home = False
+                if the_qs[0].inning_half == 'bottom':
+                    current_game_home = True
+
+                cumulative_stat = 0
+                match stat:
+
+                    case 'home_run':
+                        cumulative_stat = the_qs.filter(batter_id=batter_id).filter(home_run=True).count()
+
+                    case 'stolen_base':
+                        cumulative_stat_qs = the_qs.filter(base_stealer_1=batter_id) | \
+                                             the_qs.filter(base_stealer_2=batter_id) | \
+                                             the_qs.filter(base_stealer_3=batter_id)
+
+                        cumulative_stat = cumulative_stat_qs.count()
+
+                    case 'hit':
+                        temp_qs = the_qs.filter(batter_id=batter_id)
+
+                        cumulative_stat_qs = temp_qs.filter(single=True) | \
+                                             temp_qs.filter(double=True) | \
+                                             temp_qs.filter(triple=True) | \
+                                             temp_qs.filter(home_run=True)
+
+                        cumulative_stat = cumulative_stat_qs.count()
+
+                    case 'run':
+                        cumulative_stat_qs = the_qs.filter(scoring_player_1=batter_id) | \
+                                             the_qs.filter(scoring_player_2=batter_id) | \
+                                             the_qs.filter(scoring_player_3=batter_id) | \
+                                             the_qs.filter(scoring_player_4=batter_id)
+
+                        cumulative_stat = cumulative_stat_qs.count()
+
+                    case 'rbi':
+                        temp_qs = the_qs.filter(batter_id=batter_id)
+                        cumulative_stat = sum(temp_qs.values_list('rbi', flat=True))
+
+                    case 'bases':
+                        temp_qs = the_qs.filter(batter_id=batter_id)
+
+                        singles = temp_qs.filter(single=True).count()
+                        doubles = temp_qs.filter(double=True).count()
+                        triples = temp_qs.filter(triple=True).count()
+
+                        home_runs = temp_qs.filter(home_run=True).count()
+
+                        cumulative_stat = singles + (doubles * 2) + (triples * 3) + (home_runs * 4)
+
+                match stat_filter:
+                    case 'none':
+                        ordered_games_by_filter_li.append(game_id)
+                        ordered_cumulative_stat_by_filter_li.append(cumulative_stat)
+                    case 'home':
+                        if current_game_home:
+                            ordered_games_by_filter_li.append(game_id)
+                            ordered_cumulative_stat_by_filter_li.append(cumulative_stat)
+                    case 'away':
+                        if not current_game_home:
+                            ordered_games_by_filter_li.append(game_id)
+                            ordered_cumulative_stat_by_filter_li.append(cumulative_stat)
+
+            time_frames_li = get_time_frames(ordered_cumulative_stat_by_filter_li)
+
+            processed_batter_stats.append({'player_id': batter_id,
+                                           'games': ordered_games_by_filter_li,
+                                           'values': ordered_cumulative_stat_by_filter_li,
+                                           'stat': stat,
+                                           'filters': stat_filter,
+                                           'time_frames': time_frames_li})
+
+    return processed_batter_stats
+
+
+def process_batter_timeframes(processed_batter_stats_di_li):
+
+    data = []
+    for di in processed_batter_stats_di_li:
+        # checks if the stat and filter combo have enough time frames to run a sim
+        # timeframe will be false if none available
+        if not di['time_frames']:
+            continue
+
+        time_frames = di['time_frames']
+        player_id = di['player_id']
+        statistic = di['stat']
+        stat_filters = di['filters']
+        game_id = None
+        game_date = None
+        actual_value = None
+        sim_values = None
+        sim_avg = None
+        sim_st_dev = None
+        prev_avg = None
+        prev_st_dev = None
+
+        for time_interval in time_frames:
+            # TODO check that this simulation doesnt currently exist in our simulated numbers table
+            time_frame = time_interval
+
+            x = 0
+            while x <= time_interval:
+                # starting at zero allows us to go ahead and create a sim set for the next future game based
+                # on current data, therefore when game = None that will be our future info
+
+                if x > 0:
+                    game_id = di['games'][x - 1]
+                    game_date = MlbGame.objects.get(game_id=game_id).game_date
+                    actual_value = di['values'][x - 1]
+
+                # creates a list of just the previous statistics from the asked for timeframe and
+                # doesn't include the current games stat
+                prev_values = di['values'][x:time_interval + x]
+                # will calculate mean and st dev in simulation
+
+                data.append({'player': player_id,
+                             'game_id': game_id,
+                             'game_date': game_date,
+                             'statistic': statistic,
+                             'time_frame': time_frame,
+                             'stat_filters': stat_filters,
+                             'prev_values': prev_values,
+                             'prev_avg': prev_avg,
+                             'prev_st_dev': prev_st_dev,
+                             'sim_values': sim_values,
+                             'sim_avg': sim_avg,
+                             'sim_st_dev': sim_st_dev,
+                             'actual_value': actual_value})
+                x += 1
+
+    return data
+
+
 def process_pitcher_stats(pitcher_id, games_all, stats):
     # TODO this has to be able to made more programmatic based on different filter setups
     processed_stats = []
@@ -108,11 +336,11 @@ def process_pitcher_stats(pitcher_id, games_all, stats):
                 games_away.append(game_id)
 
         processed_stats.append({'player_id': pitcher_id, 'time_frames': get_time_frames(stat_all),
-                               'games': games_all, 'values': stat_all, 'stat': stat, 'filters': "all"})
+                                'games': games_all, 'values': stat_all, 'stat': stat, 'filters': "all"})
         processed_stats.append({'player_id': pitcher_id, 'time_frames': get_time_frames(stat_home),
-                               'games': games_home, 'values': stat_home, 'stat': stat, 'filters': "home"})
+                                'games': games_home, 'values': stat_home, 'stat': stat, 'filters': "home"})
         processed_stats.append({'player_id': pitcher_id, 'time_frames': get_time_frames(stat_away),
-                               'games': games_away, 'values': stat_away, 'stat': stat, 'filters': "away"})
+                                'games': games_away, 'values': stat_away, 'stat': stat, 'filters': "away"})
     return processed_stats
 
 
@@ -153,7 +381,7 @@ def process_pitcher_info(processed_stat_dict):
             sim_st_dev = None
 
             temp_dict = {'player': player,
-                         'game': game,
+                         'game_id': game,
                          'game_date': game_date,
                          'statistic': statistic,
                          'time_frame': time_frame,
@@ -175,7 +403,7 @@ def process_pitcher_info(processed_stat_dict):
 def mp_update_player_simulations_table(data):
     for d in data:
         row = MlbPlayerSimulations(player=d['player'],
-                                   game=d['game'],
+                                   game_id=d['game_id'],
                                    game_date=d['game_date'],
                                    statistic=d['statistic'],
                                    time_frame=d['time_frame'],
@@ -201,28 +429,28 @@ def analyze_pitcher_simulations(player_id):
 
     # get each unique stat that is stored in simulated date
     player_query_set = MlbPlayerSimulations.objects.filter(player=player_id)
-    stat_query_set = player_query_set\
-        .values_list('statistic', flat=True)\
+    stat_query_set = player_query_set \
+        .values_list('statistic', flat=True) \
         .distinct()
     # get each unique filter that is stored in simulated data for each stat
     for stat in stat_query_set:
-        filter_query_set = player_query_set\
-            .filter(statistic=stat)\
-            .values_list('stat_filters', flat=True)\
+        filter_query_set = player_query_set \
+            .filter(statistic=stat) \
+            .values_list('stat_filters', flat=True) \
             .distinct()
         # get each unique time interval that is stored in simulated data for each filter
         for stat_filter in filter_query_set:
-            time_frame_query_set = player_query_set\
-                .filter(statistic=stat)\
-                .filter(stat_filters=stat_filter)\
-                .values_list('time_frame', flat=True)\
+            time_frame_query_set = player_query_set \
+                .filter(statistic=stat) \
+                .filter(stat_filters=stat_filter) \
+                .values_list('time_frame', flat=True) \
                 .distinct()
             # get all table items that are in the current time interval
             for time_interval in time_frame_query_set:
-                query_set = player_query_set\
-                    .filter(statistic=stat)\
-                    .filter(stat_filters=stat_filter)\
-                    .filter(time_frame=time_interval)\
+                query_set = player_query_set \
+                    .filter(statistic=stat) \
+                    .filter(stat_filters=stat_filter) \
+                    .filter(time_frame=time_interval) \
                     .exclude(actual_value=None)  # do not want to include the future prediction when backtesting
 
                 print(stat)
@@ -248,6 +476,7 @@ def analyze_pitcher_simulations(player_id):
         analyzed_group_list.append(post_sim_analysis(sim_group_di))
 
     """
+    this is where i pull out the best of the best information for each one and analyze the sim numbers
     for each item in the analyzed group
         query_set = player_query_set\
                     .filter(statistic=stat)\
@@ -288,8 +517,8 @@ def post_sim_analysis(sim_group_di):  # needs to actually be a dictionary so can
 
     sim_group_li = []
     for s_option in sim_options:
-        sim_group_di.update({'values': un_pickled_values}) # this has to be in the loop to reset the dictionary
-        sim_group_di.update({'sim_option': s_option})  # TODO data is persisting through the loops in a way it shouldn't
+        sim_group_di.update({'values': un_pickled_values})  # this has to be in the loop to reset the dictionary
+        sim_group_di.update({'sim_option': s_option})
         s_option_di = {}
         match s_option:
             case 'Raw':
@@ -380,7 +609,7 @@ def post_sim_analysis(sim_group_di):  # needs to actually be a dictionary so can
 
                             sim_li = r_option_di['values'][i]['sim_value']
                             count = sum(x > bet_line for x in sim_li)
-                            expected_probability = count/len(sim_li)
+                            expected_probability = count / len(sim_li)
                             temp_expected_probability_li.append(expected_probability)
 
                             actual_value = sim_group_di['values'][i]['actual_value']
@@ -395,8 +624,8 @@ def post_sim_analysis(sim_group_di):  # needs to actually be a dictionary so can
                                                      'expected_probability': expected_probability,
                                                      'actual_result': actual_result})
 
-                        expected_prob_avg = sum(temp_expected_probability_li)/len(temp_expected_probability_li)
-                        actual_result_avg = sum(temp_actual_result_li)/len(temp_actual_result_li)
+                        expected_prob_avg = sum(temp_expected_probability_li) / len(temp_expected_probability_li)
+                        actual_result_avg = sum(temp_actual_result_li) / len(temp_actual_result_li)
                         sim_group_di.update({'bet_line': bet_line,
                                              'values': temp_value_di_li,
                                              'expected_prob_avg': expected_prob_avg,
@@ -427,21 +656,23 @@ def post_sim_analysis(sim_group_di):  # needs to actually be a dictionary so can
                                                      'expected_probability': expected_probability,
                                                      'actual_result': actual_result})
 
-                        expected_prob_avg = sum(temp_expected_probability_li)/len(temp_expected_probability_li)
-                        actual_result_avg = sum(temp_actual_result_li)/len(temp_actual_result_li)
+                        expected_prob_avg = sum(temp_expected_probability_li) / len(temp_expected_probability_li)
+                        actual_result_avg = sum(temp_actual_result_li) / len(temp_actual_result_li)
                         sim_group_di.update({'bet_line': bet_line,
                                              'values': temp_value_di_li,
                                              'expected_prob_avg': expected_prob_avg,
                                              'actual_result_avg': actual_result_avg,
                                              'difference': expected_prob_avg - actual_result_avg})
 
-                print(sim_group_di['stat'] + "\t" + sim_group_di['stat_filter'] + "\t" + str(sim_group_di['time_interval'])
-                      + "\t" + sim_group_di['sim_option'] + "\t\t" + sim_group_di['round_option'] + "\t" + sim_group_di['bet_option']
+                print(sim_group_di['stat'] + "\t" + sim_group_di['stat_filter'] + "\t" + str(
+                    sim_group_di['time_interval'])
+                      + "\t" + sim_group_di['sim_option'] + "\t\t" + sim_group_di['round_option'] + "\t" + sim_group_di[
+                          'bet_option']
                       + "\t" + "bet line: " + str(sim_group_di['bet_line'])
                       + "\t" + "exp prob: " + str(round((sim_group_di['expected_prob_avg']) * 100, 2)) + "%"
                       + "\t" + "act res: " + str(round((sim_group_di['actual_result_avg']) * 100, 2)) + "%"
                       + "\t" + "Difference: " + str(round((sim_group_di['difference']) * 100, 6)) + "%")
-                if sim_group_di['bet_option'] == 'Under' and False:  # can choose True or False if i want to see for debug
+                if sim_group_di['bet_option'] == 'Under' and False:  # choose True or False if I want to see for debug
                     for item in sim_group_di['values']:
                         print(str(item['sim_value'][0]) + "\t length: " + str(len(item['sim_value']))
                               + "\t" + "below zero: " + str(len(below_zero(item['sim_value'])))
