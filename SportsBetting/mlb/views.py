@@ -32,11 +32,7 @@ def update_page(request):
     # simulation.mp_prepare_upcoming_player_data()
     # simulation.analyze_predictions_table()
     # simulation.analyze_pitcher_simulations(506433)
-    start = time.time()
     simulation.process_batters([572041])
-    end = time.time()
-    total = int(round(end - start))
-    print("ended in " + str(total) + " seconds")
     # bovada.refresh_bov_mlb_upcoming_games()
     return render(request, 'mlb/update_page.html')
 

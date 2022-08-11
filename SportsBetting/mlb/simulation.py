@@ -64,7 +64,7 @@ def process_batters(batters):
         player_name = MlbBovadaUpcomingBatters.objects.filter(player_id=batter)[0].player_name
         print(player_name)
 
-        # get queryset of games where they have an at_bat in order of most recent first
+        # get queryset of at_bats where they have a participated at_bat in order of most recent first
         at_bats_played_qs = MlbAtBat.objects.filter(batter_id=batter) | \
                             MlbAtBat.objects.filter(scoring_player_1=batter) | \
                             MlbAtBat.objects.filter(scoring_player_2=batter) | \
@@ -151,92 +151,96 @@ def process_pitchers(pitcher):
 def process_batter_stats(batter_di):
     batter_id = batter_di['player_id']
 
+    # need to do anything to only query the games list once for each game
+    processed_game_stats_di_li = []
+    for game_id in batter_di['ordered_game_ids']:
+        processed_game_stats = {}
+        processed_game_stats.update({'game_id': game_id})
+
+        at_bats_in_game = MlbAtBat.objects.filter(game_id=game_id)
+
+        # query set that includes every at bat, that was impacted by the batter in this game
+        players_impacted_at_bats = at_bats_in_game.filter(batter_id=batter_id) | \
+                                   at_bats_in_game.filter(scoring_player_1=batter_id) | \
+                                   at_bats_in_game.filter(scoring_player_2=batter_id) | \
+                                   at_bats_in_game.filter(scoring_player_3=batter_id) | \
+                                   at_bats_in_game.filter(scoring_player_4=batter_id) | \
+                                   at_bats_in_game.filter(base_stealer_1=batter_id) | \
+                                   at_bats_in_game.filter(base_stealer_2=batter_id) | \
+                                   at_bats_in_game.filter(base_stealer_3=batter_id)
+
+        # query set that includes every at bat where batter was actually batting in game
+        batting_at_bats = at_bats_in_game.filter(batter_id=batter_id)
+
+        # query set that includes every non batting at bat where he made a play
+        plays_at_bats_qs = at_bats_in_game.filter(scoring_player_1=batter_id) | \
+                           at_bats_in_game.filter(scoring_player_2=batter_id) | \
+                           at_bats_in_game.filter(scoring_player_3=batter_id) | \
+                           at_bats_in_game.filter(scoring_player_4=batter_id) | \
+                           at_bats_in_game.filter(base_stealer_1=batter_id) | \
+                           at_bats_in_game.filter(base_stealer_2=batter_id) | \
+                           at_bats_in_game.filter(base_stealer_3=batter_id)
+
+        # check if this game was home or away for the batter, home bats second in each inning
+        if players_impacted_at_bats[0].inning_half == 'bottom':
+            processed_game_stats.update({'home_or_away': 'home'})
+        elif players_impacted_at_bats[0].inning_half == 'top':
+            processed_game_stats.update({'home_or_away': 'away'})
+
+        homerun = batting_at_bats.filter(home_run=True).count()
+        processed_game_stats.update({'homerun': homerun})
+
+        stolen_bases_qs = plays_at_bats_qs.filter(base_stealer_1=batter_id) | \
+                          plays_at_bats_qs.filter(base_stealer_2=batter_id) | \
+                          plays_at_bats_qs.filter(base_stealer_3=batter_id)
+        stolen_bases = stolen_bases_qs.count
+        processed_game_stats.update({'stolen_base': stolen_bases})
+
+        hit_qs = batting_at_bats.filter(single=True) | \
+                 batting_at_bats.filter(double=True) | \
+                 batting_at_bats.filter(triple=True) | \
+                 batting_at_bats.filter(home_run=True)
+        hit = hit_qs.count()
+        processed_game_stats.update({'hit': hit})
+
+        run_qs = plays_at_bats_qs.filter(scoring_player_1=batter_id) | \
+                  plays_at_bats_qs.filter(scoring_player_2=batter_id) | \
+                  plays_at_bats_qs.filter(scoring_player_3=batter_id) | \
+                  plays_at_bats_qs.filter(scoring_player_4=batter_id)
+        run = run_qs.count()
+        processed_game_stats.update({'run': run})
+
+        rbi = sum(batting_at_bats.values_list('rbi', flat=True))
+        processed_game_stats.update({'rbi': rbi})
+
+        singles = batting_at_bats.filter(single=True).count()
+        doubles = batting_at_bats.filter(double=True).count()
+        triples = batting_at_bats.filter(triple=True).count()
+        home_runs = batting_at_bats.filter(home_run=True).count()
+        bases = singles + (doubles * 2) + (triples * 3) + (home_runs * 4)
+        processed_game_stats.update({'bases': bases})
+
+        processed_game_stats_di_li.append(processed_game_stats)
+
     processed_batter_stats = []
-    print(batter_di['stats'])
-
     for stat in batter_di['stats']:
-
         for stat_filter in batter_di['stat_filters']:
             ordered_games_by_filter_li = []
             ordered_cumulative_stat_by_filter_li = []
-
-            for game_id in batter_di['ordered_game_ids']:
-
-                at_bats_in_game = MlbAtBat.objects.filter(game_id=game_id)
-
-                # query set that includes every at bat, that was impacted by the batter in this game
-                the_qs = at_bats_in_game.filter(batter_id=batter_id) | \
-                         at_bats_in_game.filter(scoring_player_1=batter_id) | \
-                         at_bats_in_game.filter(scoring_player_2=batter_id) | \
-                         at_bats_in_game.filter(scoring_player_3=batter_id) | \
-                         at_bats_in_game.filter(scoring_player_4=batter_id) | \
-                         at_bats_in_game.filter(base_stealer_1=batter_id) | \
-                         at_bats_in_game.filter(base_stealer_2=batter_id) | \
-                         at_bats_in_game.filter(base_stealer_3=batter_id)
-
-                # check if this game was home or away for the batter, home bats second in each inning
-                current_game_home = False
-                if the_qs[0].inning_half == 'bottom':
-                    current_game_home = True
-
-                cumulative_stat = 0
-                match stat:
-
-                    case 'home_run':
-                        cumulative_stat = the_qs.filter(batter_id=batter_id).filter(home_run=True).count()
-
-                    case 'stolen_base':
-                        cumulative_stat_qs = the_qs.filter(base_stealer_1=batter_id) | \
-                                             the_qs.filter(base_stealer_2=batter_id) | \
-                                             the_qs.filter(base_stealer_3=batter_id)
-
-                        cumulative_stat = cumulative_stat_qs.count()
-
-                    case 'hit':
-                        temp_qs = the_qs.filter(batter_id=batter_id)
-
-                        cumulative_stat_qs = temp_qs.filter(single=True) | \
-                                             temp_qs.filter(double=True) | \
-                                             temp_qs.filter(triple=True) | \
-                                             temp_qs.filter(home_run=True)
-
-                        cumulative_stat = cumulative_stat_qs.count()
-
-                    case 'run':
-                        cumulative_stat_qs = the_qs.filter(scoring_player_1=batter_id) | \
-                                             the_qs.filter(scoring_player_2=batter_id) | \
-                                             the_qs.filter(scoring_player_3=batter_id) | \
-                                             the_qs.filter(scoring_player_4=batter_id)
-
-                        cumulative_stat = cumulative_stat_qs.count()
-
-                    case 'rbi':
-                        temp_qs = the_qs.filter(batter_id=batter_id)
-                        cumulative_stat = sum(temp_qs.values_list('rbi', flat=True))
-
-                    case 'bases':
-                        temp_qs = the_qs.filter(batter_id=batter_id)
-
-                        singles = temp_qs.filter(single=True).count()
-                        doubles = temp_qs.filter(double=True).count()
-                        triples = temp_qs.filter(triple=True).count()
-
-                        home_runs = temp_qs.filter(home_run=True).count()
-
-                        cumulative_stat = singles + (doubles * 2) + (triples * 3) + (home_runs * 4)
+            for game_di in processed_game_stats_di_li:
 
                 match stat_filter:
                     case 'none':
-                        ordered_games_by_filter_li.append(game_id)
-                        ordered_cumulative_stat_by_filter_li.append(cumulative_stat)
+                        ordered_games_by_filter_li.append(game_di['game_id'])
+                        ordered_cumulative_stat_by_filter_li.append(game_di[stat])
                     case 'home':
-                        if current_game_home:
-                            ordered_games_by_filter_li.append(game_id)
-                            ordered_cumulative_stat_by_filter_li.append(cumulative_stat)
+                        if game_di['home_or_away'] == 'home':
+                            ordered_games_by_filter_li.append(game_di['game_id'])
+                            ordered_cumulative_stat_by_filter_li.append(game_di[stat])
                     case 'away':
-                        if not current_game_home:
-                            ordered_games_by_filter_li.append(game_id)
-                            ordered_cumulative_stat_by_filter_li.append(cumulative_stat)
+                        if game_di['home_or_away'] == 'away':
+                            ordered_games_by_filter_li.append(game_di['game_id'])
+                            ordered_cumulative_stat_by_filter_li.append(game_di[stat])
 
             time_frames_li = get_time_frames(ordered_cumulative_stat_by_filter_li)
 
