@@ -7,6 +7,8 @@ from .models import MlbLocation
 from .models import MlbAtBat
 from .models import MlbUpcomingGames
 from .models import MlbPlayerSimulations
+from .models import MlbBovadaPitchersPostSimData
+from .models import MlbBovadaPitchersBetComparison
 
 # Register your models here.
 
@@ -18,3 +20,6 @@ admin.site.register(MlbLocation)
 admin.site.register(MlbAtBat)
 admin.site.register(MlbUpcomingGames)
 admin.site.register(MlbPlayerSimulations)
+admin.site.register(MlbBovadaPitchersPostSimData)
+admin.site.register(MlbBovadaPitchersBetComparison)
+

@@ -148,13 +148,14 @@ class MlbUpcomingPlayers(BaseModel):
                              related_name='upcoming_players_team', blank=True, null=True)
     player = models.ForeignKey('MlbPlayer', on_delete=models.CASCADE,
                                related_name='upcoming_player', blank=True, null=True)
+    position_type = models.TextField(blank=True, null=True)
+    home_or_away = models.TextField(blank=True, null=True)
     first_name = models.TextField(blank=True, null=True)
     last_name = models.TextField(blank=True, null=True)
 
 
 class MlbPlayerSimulations(BaseModel):
-    player = models.ForeignKey('MlbPlayer', on_delete=models.CASCADE,
-                               related_name='simulated_player', blank=True, null=True)
+    player = models.IntegerField(blank=True, null=True)
     game_id = models.IntegerField(blank=True, null=True)
     game_date = models.DateField(blank=True, null=True)
     statistic = models.TextField(blank=True, null=True)
@@ -179,6 +180,9 @@ class MlbPlayerSimulations(BaseModel):
 class MlbBovadaUpcomingPitchers(BaseModel):
     player_id = models.IntegerField(blank=True, null=True)
     player_name = models.TextField(blank=True, null=True)
+    game_id = models.IntegerField(blank=True, null=True)
+    team_id = models.IntegerField(blank=True, null=True)
+    home_or_away = models.TextField(blank=True, null=True)
     stat = models.TextField(blank=True, null=True)
     over_line = models.FloatField(blank=True, null=True)
     under_line = models.FloatField(blank=True, null=True)
@@ -189,6 +193,41 @@ class MlbBovadaUpcomingPitchers(BaseModel):
 class MlbBovadaUpcomingBatters(BaseModel):
     player_id = models.IntegerField(blank=True, null=True)
     player_name = models.TextField(blank=True, null=True)
+    game_id = models.IntegerField(blank=True, null=True)
+    team_id = models.IntegerField(blank=True, null=True)
+    home_or_away = models.TextField(blank=True, null=True)
     stat = models.TextField(blank=True, null=True)
     over_line = models.FloatField(blank=True, null=True)
     odds = models.IntegerField(blank=True, null=True)
+
+
+class MlbBovadaPitchersPostSimData(BaseModel):
+    player_id = models.IntegerField(blank=True, null=True)
+    player_name = models.TextField(blank=True, null=True)
+    team_id = models.IntegerField(blank=True, null=True)
+    stat = models.TextField(blank=True, null=True)
+    stat_filter = models.TextField(blank=True, null=True)
+    time_interval = models.IntegerField(blank=True, null=True)
+    sim_option = models.TextField(blank=True, null=True)
+    round_option = models.TextField(blank=True, null=True)
+    bet_option = models.TextField(blank=True, null=True)
+    bet_line = models.FloatField(blank=True, null=True)
+    bet_odds = models.IntegerField(blank=True, null=True)
+    expected_prob_avg = models.FloatField(blank=True, null=True)
+    actual_result_avg = models.FloatField(blank=True, null=True)
+    difference = models.FloatField(blank=True, null=True)
+
+
+class MlbBovadaPitchersBetComparison(BaseModel):
+    player_id = models.IntegerField(blank=True, null=True)
+    player_name = models.TextField(blank=True, null=True)
+    team_id = models.IntegerField(blank=True, null=True)
+    upcoming_game_id = models.IntegerField(blank=True, null=True)
+    stat = models.TextField(blank=True, null=True)
+    bet_option = models.TextField(blank=True, null=True)
+    bovada_bet_line = models.FloatField(blank=True, null=True)
+    bovada_bet_odds = models.IntegerField(blank=True, null=True)
+    bovada_implied_probability = models.FloatField(blank=True, null=True)
+    sim_bet_odds = models.IntegerField(blank=True, null=True)
+    sim_implied_probability = models.FloatField(blank=True, null=True)
+    expected_value_per_unit = models.FloatField(blank=True, null=True)

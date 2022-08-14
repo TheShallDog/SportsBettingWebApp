@@ -13,32 +13,35 @@ from .models import MlbUpcomingPlayers
 BASE_URL = "https://statsapi.mlb.com"
 
 
-def update_completed_games():
-    # put in the code delete anything older than 5 season.
+def update_completed_games(recent=True, current=True, previous=True, previous_seasons=5):
+    # TODO put in the code delete anything older than 5 season.
     overall_start = time.time()
-    # retrieve the game_ids that we need to add to our database
-    previous_game_ids = previous_games_to_update()
-    # retrieve all the game ids currently in the database
-    existing_game_ids = MlbGame.objects.values_list('game_id', flat=True)
-    # create a list that only has the games not currently in database
-    game_ids = [ele for ele in previous_game_ids if ele not in existing_game_ids]
-    # create entries in database for all games not yet entered
-    for game in game_ids:
-        start = time.time()
-        update_completed_game_table(game)
-        end = time.time()
-        total = round(end-start)
-        print("game id: " + str(game) + " updated in " + str(total) + " seconds")
+
+    if previous:
+        update_previous_seasons_games(previous_seasons)
+        print("previous season's games updated in " + str(round(time.time() - overall_start)) + " seconds")
+    if current:
+        update_current_season_games()
+        print("current season games updated in " + str(round(time.time() - overall_start)) + " seconds")
+    if recent:
+        update_recent_games()
+        print("recent games updated in " + str(round(time.time() - overall_start)) + " seconds")
+
     overall_end = time.time()
     overall_total = round(overall_end-overall_start)
-    print("completed games updated in " + str(overall_total) + " seconds")
+    print("all games updated in " + str(overall_total) + " seconds")
 
 
-def update_upcoming_games():
+def update_upcoming_games_and_players():
+    # delete previous table entries
+    MlbUpcomingGames.objects.all().delete()
+    MlbUpcomingPlayers.objects.all().delete()
+
+    # only update for current day
     overall_start = time.time()
-    start_date = datetime.date.today().strftime('%m/%d/%Y')
-    end_date = (datetime.date.today() + datetime.timedelta(1)).strftime('%m/%d/%Y')  # yesterday
-    url = f"{BASE_URL}/api/v1/schedule?startDate={start_date}&endDate={end_date}&sportId=1"
+    date = datetime.date.today().strftime('%m/%d/%Y')
+    url = f"{BASE_URL}/api/v1/schedule?date={date}&sportId=1"
+
     print(url)
     time.sleep(.1)
     response = requests.get(url)
@@ -47,14 +50,12 @@ def update_upcoming_games():
     for date in jason['dates']:
         for game in date['games']:
             upcoming_game_ids.append(int(game['gamePk']))
-    existing_game_ids = MlbUpcomingGames.objects.values_list('game_id', flat=True)
-    game_ids = [ele for ele in upcoming_game_ids if ele not in existing_game_ids]
-    for game in game_ids:
+    for game_id in upcoming_game_ids:
         start = time.time()
-        update_upcoming_game_table(game)
+        update_upcoming_game_table(game_id)
         end = time.time()
         total = round(end-start)
-        print("game id: " + str(game) + " updated in " + str(total) + " seconds")
+        print("game id: " + str(game_id) + " updated in " + str(total) + " seconds")
     overall_end = time.time()
     overall_total = round(overall_end-overall_start)
     print("upcoming games updated in " + str(overall_total) + " seconds")
@@ -98,9 +99,9 @@ def update_upcoming_game_table(g_id):
         temp_id = int(gp_json['probables']['awayProbable'])
         update_player_table(temp_id)
         away_probable_pitcher = MlbPlayer.objects.get(player_id=temp_id)
+
     except (KeyError, TypeError):
         away_probable_pitcher = None
-
     home_team_id = int(gp_json['probables']['homeId'])
     update_team_table(home_team_id)
     home_team = MlbTeam.objects.get(team_id=home_team_id)
@@ -127,11 +128,16 @@ def update_upcoming_game_table(g_id):
                          games_in_series_total=games_in_series_total)
     g.save()
 
-    update_upcoming_player_table(g_id, away_team_id, gp_json['away'])
-    update_upcoming_player_table(g_id, home_team_id, gp_json['home'])
+    if away_probable_pitcher:
+        update_upcoming_player_table(g_id, away_team_id, [{'id': away_probable_pitcher.player_id}], 'away')
+    if home_probable_pitcher:
+        update_upcoming_player_table(g_id, home_team_id, [{'id': home_probable_pitcher.player_id}], 'home')
+
+    update_upcoming_player_table(g_id, away_team_id, gp_json['away'], 'away')
+    update_upcoming_player_table(g_id, home_team_id, gp_json['home'], 'home')
 
 
-def update_upcoming_player_table(g_id, t_id, players):
+def update_upcoming_player_table(g_id, t_id, players, home_or_away):
     game = MlbUpcomingGames.objects.get(game_id=int(g_id))
     team = MlbTeam.objects.get(team_id=int(t_id))
 
@@ -139,12 +145,15 @@ def update_upcoming_player_table(g_id, t_id, players):
         temp_id = int(athlete['id'])
         update_player_table(temp_id)
         player = MlbPlayer.objects.get(player_id=temp_id)
+        position_type = player.position_type
         first_name = player.first_name
         last_name = player.last_name
 
         p = MlbUpcomingPlayers(game=game,
                                team=team,
                                player=player,
+                               position_type=position_type,
+                               home_or_away=home_or_away,
                                first_name=first_name,
                                last_name=last_name)
         p.save()
@@ -220,27 +229,96 @@ def location_info_json(location_id):
     return jason
 
 
-def previous_games_to_update():
-    # if the table is empty it will start over building it from a season 5 years aog
-    # if the table has entries creates a list of games from a week before most recent through yesterday
-    try:
-        last_saved_game_date = MlbGame.objects.latest('game_date').game_date
-        start_date = (last_saved_game_date - datetime.timedelta(6)).strftime('%m/%d/%Y')
-    except:
-        five_years_ago = datetime.date.today().year - 5
-        start_date = f"01/01/{five_years_ago}"  # January 1st from 5 years ago - use when initializing table
+def update_previous_seasons_games(previous_seasons):
+    if previous_seasons > 5:
+        x = 5
+    else:
+        x = previous_seasons
 
+    while x > 0:
+        prev_season_year = datetime.date.today().year - x
+        start_date = f"01/01/{prev_season_year}"  # January 1st from 5 years ago - use when initializing table
+        end_date = f"12/31/{prev_season_year}"
+
+        url = f"{BASE_URL}/api/v1/schedule?startDate={start_date}&endDate={end_date}&sportId=1"
+        print(url)
+        time.sleep(.1)
+        response = requests.get(url)
+        jason = response.json()
+
+        prev_season_game_ids = []
+        for date in jason['dates']:
+            for game in date['games']:
+                prev_season_game_ids.append(int(game['gamePk']))
+        try:
+            existing_game_ids = MlbGame.objects.values_list('game_id', flat=True)
+            # remove game_ids already in the database
+            game_ids = [game_id for game_id in prev_season_game_ids if game_id not in existing_game_ids]
+        except:
+            game_ids = prev_season_game_ids
+
+        for game in game_ids:
+            start = time.time()
+            update_completed_game_table(game)
+            end = time.time()
+            total = round(end - start)
+            print("game id: " + str(game) + " updated in " + str(total) + " seconds")
+
+        x -= 1
+
+
+def update_current_season_games():
+    this_year = datetime.date.today().year
+    start_date = f"01/01/{this_year}"
     end_date = (datetime.date.today() - datetime.timedelta(1)).strftime('%m/%d/%Y')  # yesterday
+
     url = f"{BASE_URL}/api/v1/schedule?startDate={start_date}&endDate={end_date}&sportId=1"
     print(url)
     time.sleep(.1)
     response = requests.get(url)
     jason = response.json()
-    game_ids = []
+
+    current_season_game_ids = []
     for date in jason['dates']:
         for game in date['games']:
-            game_ids.append(int(game['gamePk']))
-    return game_ids
+            current_season_game_ids.append(int(game['gamePk']))
+
+    existing_game_ids = MlbGame.objects.values_list('game_id', flat=True)
+    game_ids = [game_id for game_id in current_season_game_ids if game_id not in existing_game_ids]
+
+    for game in game_ids:
+        start = time.time()
+        update_completed_game_table(game)
+        end = time.time()
+        total = round(end-start)
+        print("game id: " + str(game) + " updated in " + str(total) + " seconds")
+
+
+def update_recent_games():
+    last_saved_game_date = MlbGame.objects.latest('game_date').game_date
+    start_date = (last_saved_game_date - datetime.timedelta(6)).strftime('%m/%d/%Y')  # 6 days before last saved
+    end_date = (datetime.date.today() - datetime.timedelta(1)).strftime('%m/%d/%Y')  # yesterday
+
+    url = f"{BASE_URL}/api/v1/schedule?startDate={start_date}&endDate={end_date}&sportId=1"
+    print(url)
+    time.sleep(.1)
+    response = requests.get(url)
+    jason = response.json()
+
+    recent_game_ids = []
+    for date in jason['dates']:
+        for game in date['games']:
+            recent_game_ids.append(int(game['gamePk']))
+
+    existing_game_ids = MlbGame.objects.values_list('game_id', flat=True)
+    game_ids = [game_id for game_id in recent_game_ids if game_id not in existing_game_ids]
+
+    for game in game_ids:
+        start = time.time()
+        update_completed_game_table(game)
+        end = time.time()
+        total = round(end - start)
+        print("game id: " + str(game) + " updated in " + str(total) + " seconds")
 
 
 def update_player_table(p_id):
@@ -534,6 +612,20 @@ def update_completed_game_table(g_id):
     # filter out spring training and exhibition games
     if g['seriesDescription'] in ['Spring Training', 'Exhibition']:
         print('spring training or exhibition game')
+        # save a place-holder so that it doesn't try to update them again - there will be no at-bats recorded
+        g = MlbGame(game_id=int(g_id),
+                    away_team=None,
+                    away_probable_pitcher=None,
+                    home_team=None,
+                    home_probable_pitcher=None,
+                    game_date=g['officialDate'],
+                    game_type=g['gameType'],
+                    location=None,
+                    games_in_series_current=None,
+                    games_in_series_total=None,
+                    season=None)
+        g.save()
+
         return
 
     # pull out the elements from the json that I want to track for each game
@@ -598,17 +690,20 @@ def update_completed_game_table(g_id):
 
 
 def update_team_roster(team_object):
-    team_id = team_object.team_id
-    roster_json = team_roster_json(team_id)['roster']
 
     # take all players with current team listed and remove this team from them
     players_prev_on_team = MlbPlayer.objects.filter(current_team=team_object)
     for player in players_prev_on_team:
-        player.current_team = team_object
+        player.current_team = None
         player.save()
 
     # take all players on api roster and add team as current team - keeps list updated
+    team_id = team_object.team_id
+    roster_json = team_roster_json(team_id)['roster']
     for player in roster_json:
-        obj = MlbPlayer.objects.get(player_id=player['person']['id'])
-        obj.current_team = team_object
-        obj.save()
+        player_id = player['person']['id']
+        update_player_table(player_id)
+
+        player_obj = MlbPlayer.objects.get(player_id=player_id)
+        player_obj.current_team = team_object
+        player_obj.save()
