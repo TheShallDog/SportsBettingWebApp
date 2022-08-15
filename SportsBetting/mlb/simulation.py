@@ -7,6 +7,7 @@ from .models import MlbBovadaUpcomingBatters
 from .models import MlbBovadaUpcomingPitchers
 from .models import MlbBovadaPitchersPostSimData
 from .models import MlbBovadaPitchersBetComparison
+from django.db.models import Q
 from multiprocessing import Pool
 from .import multiprocess_work as mp
 import datetime
@@ -19,6 +20,7 @@ def get_upcoming_pitchers():
     probable_pitchers = MlbUpcomingPlayers.objects.filter(position_type='Pitcher')\
                                                   .values_list('player_id', flat=True).distinct()
     probable_pitchers = list(filter(None, probable_pitchers))  # remove None values
+    print(len(probable_pitchers))
     return probable_pitchers
 
 
@@ -26,6 +28,7 @@ def get_upcoming_batters():
     probable_batters = MlbUpcomingPlayers.objects.exclude(position_type='Pitcher')\
                                                   .values_list('player_id', flat=True).distinct()
     probable_batters = list(filter(None, probable_batters))  # remove None values
+    print(len(probable_batters))
     return probable_batters
 
 
@@ -60,22 +63,22 @@ def get_time_frames(input_list):
 
 
 def mp_prepare_upcoming_player_data():
-    start = time.time()
     probable_pitchers = get_upcoming_pitchers()
-    probable_batters = []  # get_upcoming_batters()
+    probable_batters = []  # get_upcoming_batters() - need to optimize or test length of running sim
+
+    start = time.time()
 
     processed_pitchers = process_pitchers(probable_pitchers)
     processed_batters = process_batters(probable_batters)
 
     all_processed_players = processed_pitchers + processed_batters
-    print("all processed players")
+    print("all processed players simulations to run")
     print(len(all_processed_players))
-    print("all processed pitchers")
+    print("all processed pitchers simulations to run")
     print(len(processed_pitchers))
-    print("all processed batters")
+    print("all processed batters simulations to run")
     print(len(processed_batters))
-    total = int(round(time.time() - start))
-    print("processes took " + str(total) + " seconds")
+    print("processing took " + str(round(time.time() - start)) + " seconds")
     return all_processed_players
 
 
@@ -99,35 +102,40 @@ def process_batters(batters):
                             MlbAtBat.objects.filter(base_stealer_2=batter) | \
                             MlbAtBat.objects.filter(base_stealer_3=batter)
 
-        played_game_ids_qs = at_bats_played_qs.values_list('game_id', flat=True).distinct()
-        played_games_ordered_qs = MlbGame.objects.filter(pk__in=played_game_ids_qs).order_by('-game_date')
+        played_game_ids_li = at_bats_played_qs.values_list('game_id', flat=True).distinct()
+        played_games_ordered_qs = MlbGame.objects.filter(pk__in=played_game_ids_li).order_by('-game_date')
 
         # turn the queryset into an ordered list
         ordered_game_ids_li = []
         for game in played_games_ordered_qs:
             ordered_game_ids_li.append(int(game.game_id))
 
+        game_cap = 82  # TODO - try to optimize everything else to allow this to be as many as possible
         temp_di = {'player_id': batter,
                    'player_name': player_name,
-                   'ordered_game_ids': ordered_game_ids_li,
+                   'ordered_game_ids': ordered_game_ids_li[:game_cap],
                    'stats': stats,
                    'stat_filters': stat_filters}
 
         # this method will return a list of dictionaries containing the full stats for each stat and filter by game
+        start = time.time()
         print("start processing batter stats")
-        processed_batter_stats_di_li = []
         temp_li = process_batter_stats(temp_di)
+        print("finish processing batter stats in " + str(round(time.time() - start, 2)) + " seconds")
+
+        # this loop takes less than 0.00 seconds to complete - would still love to get rid of it
+        processed_batter_stats_di_li = []
         for di in temp_li:
             processed_batter_stats_di_li.append(di)
-        print("finish processing batter stats")
 
         # this method expands on the previous to break them down by individual timeframes
         # and with their respective values
-        print("start processing player_timeframes")
+        start = time.time()
+        print("start processing player timeframes")
         temp_li = process_player_timeframes(processed_batter_stats_di_li)
         for di in temp_li:
             batter_pre_sim_complete_di_li.append(di)
-        print("finishing processing player_timeframes")
+        print("finishing processing timeframes in " + str(round(time.time() - start, 2)) + " seconds")
 
     return batter_pre_sim_complete_di_li
 
@@ -181,76 +189,74 @@ def process_batter_stats(batter_di):
     player_name = batter_di['player_name']
 
     # need to do anything to only query the games list once for each game
+
     processed_game_stats_di_li = []
     for game_id in batter_di['ordered_game_ids']:
-        processed_game_stats = {}
-        processed_game_stats.update({'game_id': game_id})
+        processed_game_stats = {'game_id': game_id}
 
-        at_bats_in_game = MlbAtBat.objects.filter(game_id=game_id)
-
-        # query set that includes every at bat, that was impacted by the batter in this game
-        players_impacted_at_bats = at_bats_in_game.filter(batter_id=batter_id) | \
-                                   at_bats_in_game.filter(scoring_player_1=batter_id) | \
-                                   at_bats_in_game.filter(scoring_player_2=batter_id) | \
-                                   at_bats_in_game.filter(scoring_player_3=batter_id) | \
-                                   at_bats_in_game.filter(scoring_player_4=batter_id) | \
-                                   at_bats_in_game.filter(base_stealer_1=batter_id) | \
-                                   at_bats_in_game.filter(base_stealer_2=batter_id) | \
-                                   at_bats_in_game.filter(base_stealer_3=batter_id)
+        players_impacted_at_bats = MlbAtBat.objects.filter(game_id=game_id)\
+                                                   .filter(Q(batter_id=batter_id) |
+                                                           Q(scoring_player_1=batter_id) |
+                                                           Q(scoring_player_2=batter_id) |
+                                                           Q(scoring_player_3=batter_id) |
+                                                           Q(scoring_player_4=batter_id) |
+                                                           Q(base_stealer_1=batter_id) |
+                                                           Q(base_stealer_2=batter_id) |
+                                                           Q(base_stealer_3=batter_id))
 
         # query set that includes every at bat where batter was actually batting in game
-        batting_at_bats = at_bats_in_game.filter(batter_id=batter_id)
+        batting_at_bats = players_impacted_at_bats.filter(batter_id=batter_id)
 
         # query set that includes every non batting at bat where he made a play
-        plays_at_bats_qs = at_bats_in_game.filter(scoring_player_1=batter_id) | \
-                           at_bats_in_game.filter(scoring_player_2=batter_id) | \
-                           at_bats_in_game.filter(scoring_player_3=batter_id) | \
-                           at_bats_in_game.filter(scoring_player_4=batter_id) | \
-                           at_bats_in_game.filter(base_stealer_1=batter_id) | \
-                           at_bats_in_game.filter(base_stealer_2=batter_id) | \
-                           at_bats_in_game.filter(base_stealer_3=batter_id)
+        plays_at_bats_qs = players_impacted_at_bats.exclude(batter_id=batter_id)
 
         # check if this game was home or away for the batter, home bats second in each inning
-        if players_impacted_at_bats[0].inning_half == 'bottom':
+        # setting a variable with this version of a call is faster than calling twice and checking
+        inning_half = players_impacted_at_bats[:1].get().inning_half
+        if inning_half == 'bottom':
             processed_game_stats.update({'home_or_away': 'home'})
-        elif players_impacted_at_bats[0].inning_half == 'top':
+        elif inning_half == 'top':
             processed_game_stats.update({'home_or_away': 'away'})
 
         homerun = batting_at_bats.filter(home_run=True).count()
         processed_game_stats.update({'homerun': homerun})
 
-        stolen_bases_qs = plays_at_bats_qs.filter(base_stealer_1=batter_id) | \
-                          plays_at_bats_qs.filter(base_stealer_2=batter_id) | \
-                          plays_at_bats_qs.filter(base_stealer_3=batter_id)
-        stolen_bases = stolen_bases_qs.count()
+        stolen_bases = plays_at_bats_qs.filter(Q(base_stealer_1=batter_id) |
+                                               Q(base_stealer_2=batter_id) |
+                                               Q(base_stealer_3=batter_id)).count()
         processed_game_stats.update({'stolen_base': stolen_bases})
 
-        hit_qs = batting_at_bats.filter(single=True) | \
-                 batting_at_bats.filter(double=True) | \
-                 batting_at_bats.filter(triple=True) | \
-                 batting_at_bats.filter(home_run=True)
-        hit = hit_qs.count()
+        """ commented out as it can be processed below with the bases calculation
+        hit = batting_at_bats.filter(Q(single=True) |
+                                     Q(double=True) |
+                                     Q(triple=True) |
+                                     Q(home_run=True)).count()
         processed_game_stats.update({'hit': hit})
+        """
 
-        run_qs = plays_at_bats_qs.filter(scoring_player_1=batter_id) | \
-                  plays_at_bats_qs.filter(scoring_player_2=batter_id) | \
-                  plays_at_bats_qs.filter(scoring_player_3=batter_id) | \
-                  plays_at_bats_qs.filter(scoring_player_4=batter_id)
-        run = run_qs.count()
+        run = plays_at_bats_qs.filter(Q(scoring_player_1=batter_id) |
+                                      Q(scoring_player_2=batter_id) |
+                                      Q(scoring_player_3=batter_id) |
+                                      Q(scoring_player_4=batter_id)).count()
         processed_game_stats.update({'run': run})
 
         rbi = sum(batting_at_bats.values_list('rbi', flat=True))
         processed_game_stats.update({'rbi': rbi})
 
+        # if we changed the at_bats table to have the value for each of these than it could sum like RBI and using ors
         singles = batting_at_bats.filter(single=True).count()
         doubles = batting_at_bats.filter(double=True).count()
         triples = batting_at_bats.filter(triple=True).count()
         home_runs = batting_at_bats.filter(home_run=True).count()
         bases = singles + (doubles * 2) + (triples * 3) + (home_runs * 4)
         processed_game_stats.update({'bases': bases})
+        hits = singles + doubles + triples + home_runs
+        processed_game_stats.update({'hit': hits})
 
         processed_game_stats_di_li.append(processed_game_stats)
 
+    # this set of loops takes less than 0.00 seconds to complete - thought I needed to pull running
+    # the game out of the bottom of the loop but turns out this is fine.
     processed_batter_stats = []
     for stat in batter_di['stats']:
         for stat_filter in batter_di['stat_filters']:
@@ -284,6 +290,7 @@ def process_batter_stats(batter_di):
     return processed_batter_stats
 
 
+# TODO optimize like the batter stats querysets
 def process_pitcher_stats(pitcher_di):
     pitcher_id = pitcher_di['player_id']
     player_name = pitcher_di['player_name']
@@ -374,7 +381,6 @@ def process_player_timeframes(processed_player_stats_di_li):
             # all of these need to reset for every time interval
             time_frame = time_interval
             game_id = None
-            game_date = None
             actual_value = None
 
             x = 0
@@ -384,7 +390,6 @@ def process_player_timeframes(processed_player_stats_di_li):
 
                 if x > 0:
                     game_id = di['games'][x - 1]
-                    game_date = MlbGame.objects.get(game_id=game_id).game_date
                     actual_value = di['values'][x - 1]
 
                 # creates a list of just the previous statistics from the asked for timeframe and
@@ -395,7 +400,6 @@ def process_player_timeframes(processed_player_stats_di_li):
                 data.append({'player_id': player_id,
                              'player_name': player_name,
                              'game_id': game_id,
-                             'game_date': game_date,
                              'statistic': statistic,
                              'time_frame': time_frame,
                              'stat_filters': stat_filters,
@@ -420,7 +424,6 @@ def mp_update_player_simulations_table(data):
         row = MlbPlayerSimulations(player_id=d['player_id'],
                                    player_name=d['player_name'],
                                    game_id=d['game_id'],
-                                   game_date=d['game_date'],
                                    statistic=d['statistic'],
                                    time_frame=d['time_frame'],
                                    stat_filters=d['stat_filters'],
@@ -442,9 +445,14 @@ def analyze_pitcher_simulations():
     prepped_for_db_table_di_li = []
 
     simulation_group_list = []
-    for pitcher_id in pitcher_ids[:2]:
+    x = 1
+    print(len(pitcher_ids))
+    for pitcher_id in pitcher_ids[7:18]:
         player_id = pitcher_id
         player_name = MlbPlayer.objects.get(player_id=pitcher_id).full_name
+        print(x)
+        x += 1
+        print(player_name)
         team_id = MlbPlayer.objects.get(player_id=pitcher_id).current_team.team_id
 
         # get each unique stat that is stored in simulated data for this pitcher
@@ -486,11 +494,6 @@ def analyze_pitcher_simulations():
                         .filter(time_frame=time_interval) \
                         .exclude(actual_value=None)  # do not want to include the future prediction when backtesting
 
-                    print(stat)
-                    print(stat_filter)
-                    print(time_interval)
-                    print(len(query_set))
-
                     values_list = []
                     for item in query_set:
                         # have to unpickle values here to allow them to be multi-processed
@@ -516,15 +519,12 @@ def analyze_pitcher_simulations():
         analyzed_group_di_li_li = run_post_sim_analysis(simulation_group_list)
 
         print("finished analyzing pitchers")
-        print(analyzed_group_di_li_li[0][0])
-
         for li in analyzed_group_di_li_li:
             for di in li:
                 prepped_for_db_table_di_li.append(di)
         print("finished prepping pitcher data")
 
     print("Start updating table")
-    print(prepped_for_db_table_di_li[0])
     update_bovada_pitcher_post_sim_data_table(prepped_for_db_table_di_li)
     print("Finished updating table")
 
@@ -532,7 +532,6 @@ def analyze_pitcher_simulations():
 
 
 def update_bovada_pitcher_bet_comparison_table():
-    MlbBovadaPitchersBetComparison.objects.all().delete()
     pitcher_ids = MlbBovadaPitchersPostSimData.objects.values_list('player_id', flat=True).distinct()
 
     for pitcher_id in pitcher_ids:
@@ -574,23 +573,34 @@ def update_bovada_pitcher_bet_comparison_table():
 
                         lowest_diff_by_filter_and_time_interval.append(best_match_obj)
 
-                # find out how to pull out the best match
-                # this is where you add to database table
-                print(stat)
-                print(bet_option)
-                # need to run the processes through to find best and worst estimates
-                #
-                for i in range(len(lowest_diff_by_filter_and_time_interval)):
-                    obj = lowest_diff_by_filter_and_time_interval[i]
-                    # create a list of each object's probability - first item in list is the best stat match
-                    print(obj.difference)
+                expected_probability_li = []
+                for obj in lowest_diff_by_filter_and_time_interval:
+                    sim_values_li_pickled = MlbPlayerSimulations.objects.filter(player_id=obj.player_id)\
+                                                                        .filter(statistic=obj.stat)\
+                                                                        .filter(stat_filters=obj.stat_filter)\
+                                                                        .filter(time_frame=obj.time_interval)\
+                                                                        .filter(game_id=None)[:1].get().sim_values
+
+                    sim_values_li = pickle.loads(sim_values_li_pickled)
+                    expected_value = post_sim_expected_value(sim_values_li, obj)
+                    expected_probability_li.append(expected_value)
+
+                lowest_expected_prob = min(expected_probability_li)
 
                 obj = lowest_diff_by_filter_and_time_interval[0]  # this is the best match
                 bovada_implied_probability = calc_implied_probability(obj.bet_odds)
-                sim_implied_probability = 0  # need to run future sim numbers through specific post sim analysis
+                sim_implied_probability = expected_probability_li[0]
+                sim_implied_probability_rounded = round(sim_implied_probability * 100, 2)
                 sim_bet_odds = calc_american_odds(sim_implied_probability)
-                expected_value_per_unit = 0  # comparison between bovada odds and sim odds
-                bet_rating = 0  # is based on below criteria
+                exp_value_per_unit = expected_value_per_unit(obj.bet_odds, sim_implied_probability)
+
+                bet_rating = 'bad'
+                if lowest_expected_prob > ((bovada_implied_probability/100) + .05):
+                    bet_rating = 'primo'
+                elif lowest_expected_prob > (bovada_implied_probability/100):
+                    bet_rating = 'great'
+                elif sim_implied_probability > (bovada_implied_probability/100):
+                    bet_rating = 'good'
 
                 row = MlbBovadaPitchersBetComparison(player_id=obj.player_id,
                                                      player_name=obj.player_name,
@@ -602,8 +612,8 @@ def update_bovada_pitcher_bet_comparison_table():
                                                      bovada_bet_odds=obj.bet_odds,
                                                      bovada_implied_probability=bovada_implied_probability,
                                                      sim_bet_odds=sim_bet_odds,
-                                                     sim_implied_probability=sim_implied_probability,
-                                                     expected_value_per_unit=expected_value_per_unit,
+                                                     sim_implied_probability=sim_implied_probability_rounded,
+                                                     expected_value_per_unit=exp_value_per_unit,
                                                      bet_rating=bet_rating,
                                                      )
                 row.save()
@@ -704,3 +714,138 @@ def calc_implied_probability(american_odds):
         return round(((-1*american_odds)/(-american_odds+100)) * 100, 2)
     if american_odds > 0:
         return round((100/(american_odds+100)) * 100, 2)
+
+
+def expected_value_per_unit(bookie_odds, model_probability):
+    bookie_decimal = 1
+
+    if bookie_odds > 0:
+        bookie_decimal = (bookie_odds/100) + 1
+    elif bookie_odds < 0:
+        bookie_decimal = (100/abs(bookie_odds)) + 1
+
+    edge = (model_probability * bookie_decimal) - 1
+
+    return edge
+
+
+def post_sim_expected_value(sim_values_li, obj):
+    sim_option = obj.sim_option
+    round_option = obj.round_option
+    bet_option = obj.bet_option
+    bet_line = obj.bet_line
+    expected_probability = None
+
+    s_option_values_li = []
+    match sim_option:
+        case 'Raw':
+            # case 'Raw' keeps the numbers the same
+            s_option_values_li = sim_values_li
+
+        case 'Zeroed':
+            # all negative sim numbers = 0
+            s_option_values_li = zeroed(sim_values_li)
+
+        case 'Absolute Value':
+            # all negative numbers absolute valued
+            s_option_values_li = abs_value(sim_values_li)
+
+        case 'Deleted':
+            # all negative numbers removed
+            s_option_values_li = removed(sim_values_li)
+
+    r_option_values_li = []
+    match round_option:
+        case 'Raw':
+            # case 'Raw' keeps the numbers the same
+            r_option_values_li = s_option_values_li
+
+        case 'Round':
+            # all numbers rounded normally
+            r_option_values_li = round_list(s_option_values_li)
+
+        case 'Round Up':
+            # all numbers rounded up to the nearest int
+            r_option_values_li = round_up_list(s_option_values_li)
+
+        case 'Round Down':
+            # all numbers rounded down to the nearest int
+            r_option_values_li = round_down_list(s_option_values_li)
+
+    match bet_option:
+        case 'Over':
+            # determine expected value for over the line and compare to actual value
+            count = sum(x > bet_line for x in r_option_values_li)
+            expected_probability = count / len(r_option_values_li)
+
+        case 'Under':
+            # determine expected value for under the line and compare to actual value
+            count = sum(x < bet_line for x in r_option_values_li)
+            expected_probability = count / len(r_option_values_li)
+
+    return expected_probability
+
+
+def below_zero(li):
+    new_li = []
+    for x in li:
+        if x < 0:
+            new_li.append(x)
+    return new_li
+
+
+def equal_zero(li):
+    new_li = []
+    for x in li:
+        if x == 0:
+            new_li.append(x)
+    return new_li
+
+
+def zeroed(li):
+    new_li = []
+    for x in li:
+        if x < 0:
+            new_li.append(0)
+        else:
+            new_li.append(x)
+    return new_li
+
+
+def abs_value(li):
+    new_li = []
+    for x in li:
+        if x < 0:
+            new_li.append(abs(x))
+        else:
+            new_li.append(x)
+    return new_li
+
+
+def removed(li):
+    new_li = []
+    for x in li:
+        if x >= 0:
+            new_li.append(x)
+    return new_li
+
+
+def round_list(li):
+    new_li = []
+    for x in li:
+        new_li.append(round(x))
+    return new_li
+
+
+def round_up_list(li):
+    new_li = []
+    for x in li:
+        new_li.append(math.ceil(x))
+    return new_li
+
+
+def round_down_list(li):
+    new_li = []
+    for x in li:
+        new_li.append(math.floor(x))
+    return new_li

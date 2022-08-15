@@ -158,7 +158,7 @@ class MlbPlayerSimulations(BaseModel):
     player_id = models.IntegerField(blank=True, null=True)
     player_name = models.TextField(blank=True, null=True)
     game_id = models.IntegerField(blank=True, null=True)
-    game_date = models.DateField(blank=True, null=True)
+    # game_date = models.DateField(blank=True, null=True)
     statistic = models.TextField(blank=True, null=True)
     time_frame = models.IntegerField(blank=True, null=True)
 
