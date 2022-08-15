@@ -155,7 +155,8 @@ class MlbUpcomingPlayers(BaseModel):
 
 
 class MlbPlayerSimulations(BaseModel):
-    player = models.IntegerField(blank=True, null=True)
+    player_id = models.IntegerField(blank=True, null=True)
+    player_name = models.TextField(blank=True, null=True)
     game_id = models.IntegerField(blank=True, null=True)
     game_date = models.DateField(blank=True, null=True)
     statistic = models.TextField(blank=True, null=True)
@@ -231,3 +232,4 @@ class MlbBovadaPitchersBetComparison(BaseModel):
     sim_bet_odds = models.IntegerField(blank=True, null=True)
     sim_implied_probability = models.FloatField(blank=True, null=True)
     expected_value_per_unit = models.FloatField(blank=True, null=True)
+    bet_rating = models.TextField(blank=True, null=True)

@@ -26,16 +26,26 @@ def index(request):
     return render(request, 'mlb/index.html', {'things': things})
 
 
+def morning_run(request):
+    update_mlb_data.update_completed_games(recent=True, current=False, previous=False, previous_seasons=5)
+    update_mlb_data.update_upcoming_games_and_players()
+    bovada.refresh_bov_mlb_upcoming_player_tables()
+
+    simulation.run_mlb_simulation()
+    simulation.analyze_pitcher_simulations()
+    simulation.update_bovada_pitcher_bet_comparison()
+
+    return HttpResponse("SUCCESS")
+
+
 def update_page(request):
     # update_mlb_data.update_completed_games(recent=True, current=False, previous=False, previous_seasons=5)
     # update_mlb_data.update_upcoming_games_and_players()
+    # bovada.refresh_bov_mlb_upcoming_player_tables()
     # simulation.mp_prepare_upcoming_player_data()
-    # simulation.analyze_predictions_table()
-    simulation.analyze_pitcher_simulations()
-    # simulation.process_pitchers([665795])
-    # simulation.process_batters([542583])
+    # simulation.analyze_pitcher_simulations()
+    simulation.update_bovada_pitcher_bet_comparison()
 
-    # bovada.refresh_bov_mlb_upcoming_games()
     return render(request, 'mlb/update_page.html')
 
 

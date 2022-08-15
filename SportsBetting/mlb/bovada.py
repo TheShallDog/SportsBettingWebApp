@@ -6,32 +6,43 @@ from .models import MlbBovadaUpcomingPitchers
 from .models import MlbTeam
 from .models import MlbBovadaUpcomingBatters
 from .import update_mlb_data
+import datetime
+import time
 
 
-def refresh_bov_mlb_upcoming_games():
-    MlbBovadaUpcomingPitchers.objects.all().delete()
-    MlbBovadaUpcomingBatters.objects.all().delete()
+def refresh_bov_mlb_upcoming_player_tables():
+    start = time.time()
+    print("starting to refresh bovada data tables")
 
     mlb_json_url = "https://www.bovada.lv/services/sports/event/coupon/events/A/description/baseball/" \
                    "mlb?marketFilterId=def&preMatchOnly=true&eventsLimit=5000&lang=en"
     print(mlb_json_url)
+
     list_of_events_json = bov_game_events_json(mlb_json_url)
 
+    pitcher_data_li = []
+    batter_data_li = []
     for event in list_of_events_json:
-        start_time_unix = event['startTime']
+
         # check if start time is after midnight of current night then skip the event - only get current day events
+        start_time_unix = event['startTime']
+        midnight_unix = get_midnight_unix()
+        if start_time_unix > midnight_unix:
+            continue
+
         teams = get_teams(event)
         upcoming_game = match_upcoming_game(start_time_unix, teams)
 
         pitcher_data = get_pitcher_data(event, teams, upcoming_game)
-        for di in pitcher_data:
-            print(di)
-        update_bovada_upcoming_pitchers_table(pitcher_data)
+        pitcher_data_li.append(pitcher_data)
 
         batter_data = get_batter_data(event, teams, upcoming_game)
-        for di in batter_data:
-            print(di)
-        update_bovada_upcoming_batters_table(batter_data)
+        batter_data_li.append(batter_data)
+
+    update_bovada_upcoming_pitchers_table(pitcher_data_li)
+    update_bovada_upcoming_batters_table(batter_data_li)
+
+    print("finished refreshing bovada data tables in " + str(round(time.time() - start)) + " seconds")
 
 
 def bov_game_events_json(league_json_url):
@@ -51,10 +62,14 @@ def bov_game_events_json(league_json_url):
         # create a complete api link
         temp_link_complete = "https://www.bovada.lv/services/sports/event/coupon/events/A/description" \
                              "{}?lang=en".format(temp_link_insert)
-        temp_response = requests.get(temp_link_complete)
         print(temp_link_complete)
-        temp_json = temp_response.json()[0]
-        league_games_json.append(temp_json['events'][0])
+        temp_response = requests.get(temp_link_complete)
+        if temp_response.status_code == 404:
+            continue
+        else:
+            temp_json = temp_response.json()
+
+        league_games_json.append(temp_json[0]['events'][0])
 
     return league_games_json
 
@@ -70,6 +85,18 @@ def get_teams(event_json):
                               'away_id': match_team(team['name'])})
 
     return team_info
+
+
+def get_midnight_unix():
+
+    date_time = datetime.datetime.today()
+    tomorrow_dt = date_time + datetime.timedelta(days=1)
+    midnight_dt = tomorrow_dt.replace(hour=0, minute=0, second=0)
+
+    # the thousand puts this in millisecond format which is what bovada is in
+    midnight_unix = time.mktime(midnight_dt.timetuple()) * 1000
+
+    return midnight_unix
 
 
 def get_pitcher_names(event_json):
@@ -355,7 +382,10 @@ def get_pitcher_data(event_json, teams, upcoming_game):
             for pitcher_name in pitchers:
                 player_name = pitcher_name
                 player_id = match_player(pitcher_name, teams)
-                team_id = MlbPlayer.objects.get(player_id=player_id).current_team_id
+                if player_id is None:
+                    team_id = None
+                else:
+                    team_id = MlbPlayer.objects.get(player_id=player_id).current_team_id
 
                 if upcoming_game.home_team_id == team_id:
                     home_or_away = 'home'
@@ -562,34 +592,49 @@ def strip_accents(text):
     return str(text)
 
 
-def update_bovada_upcoming_pitchers_table(pitcher_data):
-    for d in pitcher_data:
-        row = MlbBovadaUpcomingPitchers(player_id=d['player_id'],
-                                        player_name=d['player_name'],
-                                        game_id=d['game_id'],
-                                        team_id=d['team_id'],
-                                        home_or_away=d['home_or_away'],
-                                        stat=d['stat'],
-                                        over_line=d['over_line'],
-                                        under_line=d['under_line'],
-                                        over_odds=d['over_odds'],
-                                        under_odds=d['under_odds'],
-                                        )
-        row.save()
+def update_bovada_upcoming_pitchers_table(pitcher_data_li):
+    start = time.time()
+    print("starting to delete then update bovada upcoming pitcher table")
+
+    MlbBovadaUpcomingPitchers.objects.all().delete()
+
+    for pitcher_data in pitcher_data_li:
+        for d in pitcher_data:
+            row = MlbBovadaUpcomingPitchers(player_id=d['player_id'],
+                                            player_name=d['player_name'],
+                                            game_id=d['game_id'],
+                                            team_id=d['team_id'],
+                                            home_or_away=d['home_or_away'],
+                                            stat=d['stat'],
+                                            over_line=d['over_line'],
+                                            under_line=d['under_line'],
+                                            over_odds=d['over_odds'],
+                                            under_odds=d['under_odds'],
+                                            )
+            row.save()
+
+    print("finished updating bovada upcoming pitcher table in " + str(round(time.time() - start)) + " seconds")
 
 
-def update_bovada_upcoming_batters_table(batter_data):
-    for d in batter_data:
-        row = MlbBovadaUpcomingBatters(player_id=d['player_id'],
-                                       player_name=d['player_name'],
-                                       game_id=d['game_id'],
-                                       team_id=d['team_id'],
-                                       home_or_away=d['home_or_away'],
-                                       stat=d['stat'],
-                                       over_line=d['over_line'],
-                                       odds=check_even_odds(d['odds']),
-                                       )
-        row.save()
+def update_bovada_upcoming_batters_table(batter_data_li):
+    start = time.time()
+    print("starting to delete then update bovada upcoming batter table")
+    MlbBovadaUpcomingBatters.objects.all().delete()
+
+    for batter_data in batter_data_li:
+        for d in batter_data:
+            row = MlbBovadaUpcomingBatters(player_id=d['player_id'],
+                                           player_name=d['player_name'],
+                                           game_id=d['game_id'],
+                                           team_id=d['team_id'],
+                                           home_or_away=d['home_or_away'],
+                                           stat=d['stat'],
+                                           over_line=d['over_line'],
+                                           odds=check_even_odds(d['odds']),
+                                           )
+            row.save()
+
+    print("finished updating bovada upcoming batter table in " + str(round(time.time() - start)) + " seconds")
 
 
 def get_upcoming_bov_pitchers():
@@ -605,31 +650,4 @@ def get_upcoming_bov_batters():
     return probable_batters
 
 
-def calc_american_odds(og_odds):
-    match og_odds:
-        # calculating american odds from implied probability
-        case n if 0 <= n < 1:
-            if og_odds == 0:
-                return 0
-            if og_odds > .5:
-                return round(((og_odds * 100) / (1 - og_odds)) * -1)
-            if og_odds < .5:
-                return round((100 / og_odds) - 100)
-            if og_odds == .5:
-                return 'EVEN'
-        # calculating american odds from decimal odds
-        case n if 1 < n < 100:
-            match og_odds:
-                case n if n >= 2:
-                    return round((og_odds - 1) * 100)
-                case n if n < 2:
-                    return round(-100/(og_odds - 1))
 
-
-def calc_implied_probability(american_odds):
-    if american_odds == 'EVEN':
-        return 50
-    if american_odds < 0:
-        return round(((-1*american_odds)/(-american_odds+100)) * 100, 2)
-    if american_odds > 0:
-        return round((100/(american_odds+100)) * 100, 2)

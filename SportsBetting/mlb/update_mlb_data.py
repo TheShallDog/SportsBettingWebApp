@@ -53,9 +53,7 @@ def update_upcoming_games_and_players():
     for game_id in upcoming_game_ids:
         start = time.time()
         update_upcoming_game_table(game_id)
-        end = time.time()
-        total = round(end-start)
-        print("game id: " + str(game_id) + " updated in " + str(total) + " seconds")
+        print("game id: " + str(game_id) + " updated in " + str(round(time.time()-start)) + " seconds")
     overall_end = time.time()
     overall_total = round(overall_end-overall_start)
     print("upcoming games updated in " + str(overall_total) + " seconds")
