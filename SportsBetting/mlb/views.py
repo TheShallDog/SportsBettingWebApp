@@ -33,7 +33,7 @@ def morning_run(request):
 
     simulation.run_mlb_simulation()
     simulation.analyze_pitcher_simulations()
-    # simulation.update_bovada_pitcher_bet_comparison_table()
+    simulation.update_bovada_pitcher_bet_comparison_table()
 
     return HttpResponse("SUCCESS")
 
@@ -43,8 +43,9 @@ def update_page(request):
     # update_mlb_data.update_upcoming_games_and_players()
     # bovada.refresh_bov_mlb_upcoming_player_tables()
     # simulation.mp_prepare_upcoming_player_data()
+    # simulation.run_mlb_simulation()
     # bovada.refresh_bov_mlb_upcoming_player_tables()
-    simulation.analyze_pitcher_simulations()
+    # simulation.analyze_pitcher_simulations()
     simulation.update_bovada_pitcher_bet_comparison_table()
 
     return render(request, 'mlb/update_page.html')

@@ -16,6 +16,7 @@ import math
 import pickle
 
 
+# would love to just have simulated date for everyone on the team and then bovada can fill in who goes where or custom
 def get_upcoming_pitchers():
     probable_pitchers = MlbUpcomingPlayers.objects.filter(position_type='Pitcher')\
                                                   .values_list('player_id', flat=True).distinct()
@@ -64,7 +65,7 @@ def get_time_frames(input_list):
 
 def mp_prepare_upcoming_player_data():
     probable_pitchers = get_upcoming_pitchers()
-    probable_batters = []  # get_upcoming_batters() - need to optimize or test length of running sim
+    probable_batters = []  # get_upcoming_batters()  # - need to optimize or test length of running sim
 
     start = time.time()
 

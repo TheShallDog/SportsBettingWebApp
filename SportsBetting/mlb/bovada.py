@@ -30,6 +30,10 @@ def refresh_bov_mlb_upcoming_player_tables():
         if start_time_unix > midnight_unix:
             continue
 
+        # check if it is a game even vs a total run event
+        if "Total Runs" in event['description']:
+            continue
+
         teams = get_teams(event)
         upcoming_game = match_upcoming_game(start_time_unix, teams)
 

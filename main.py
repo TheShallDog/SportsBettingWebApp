@@ -44,12 +44,4 @@ def go():
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
-    a = np.arange(32).astype(np.float32)
-    res = np.empty_like(a)
-
-    plat = cl.get_platforms()
-    devices = plat[0].get_devices()
-    ctx = cl.Context([devices[0]])  # with the above is the same as ctx = cl.create_some_context()
-    print(ctx.get_info(cl.context_info.DEVICES))
-    queue = cl.CommandQueue(ctx)
-    # go()
+    print(statsapi.meta('statTypes'))
