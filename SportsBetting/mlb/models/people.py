@@ -1,7 +1,8 @@
 from django.db import models
+from base_model import BaseModel
 
 
-class People(models.Model):
+class People(BaseModel):
     id = models.IntegerField(primary_key=True)
 
     # complete name information

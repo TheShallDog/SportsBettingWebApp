@@ -1,7 +1,8 @@
 from django.db import models
+from base_model import BaseModel
 
 
-class Team(models.Model):
+class Team(BaseModel):
     id = models.IntegerField(primary_key=True)
     name = models.CharField(max_length=100, blank=True, null=True)
 

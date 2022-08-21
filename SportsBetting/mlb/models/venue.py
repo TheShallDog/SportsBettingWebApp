@@ -1,7 +1,8 @@
 from django.db import models
+from base_model import BaseModel
 
 
-class Venue(models.Model):
+class Venue(BaseModel):
     id = models.IntegerField(primary_key=True)
     name = models.CharField(max_length=100, blank=True, null=True)
     active = models.BooleanField(max_length=100, blank=True, null=True)
