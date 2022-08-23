@@ -47,7 +47,7 @@ class Game(BaseModel):
     last_updated = models.DateTimeField(auto_now=True)
 
     @staticmethod
-    def populate_table():
+    def populate():
         x = 5  # record game data from 5 years ago through this year
         while x >= 0:
             season_year = datetime.date.today().year - x
@@ -83,7 +83,14 @@ class Game(BaseModel):
             x -= 1
 
     @staticmethod
-    def update(game_id):
+    def update(game_id, override=False):
+        if Game.objects.get(id=game_id).exists():
+            obj = Game.objects.get(id=game_id)
+            if obj.last_updated > (datetime.date.today() - datetime.timedelta(weeks=50)):
+                if obj.detailed_state in ['Final', 'Completed Early', 'Cancelled']:
+                    if override is not True:
+                        return
+
         game_id_json = Game.get_json(game_id)
 
         # some future games have no pre-populated info and some games have been postponed
@@ -108,7 +115,7 @@ class Game(BaseModel):
         start_time_tbd = bool(g['status']['startTimeTBD'])
 
         temp_id = int(g['teams']['away']['team']['id'])
-        Team.update_table(temp_id)
+        Team.update(temp_id)
         away_team = Team.objects.get(id=temp_id)
         try:
             away_score = int(g['teams']['away']['score'])
@@ -118,7 +125,7 @@ class Game(BaseModel):
             away_is_winner = None
 
         temp_id = int(g['teams']['home']['team']['id'])
-        Team.update_table(temp_id)
+        Team.update(temp_id)
         home_team = Team.objects.get(id=temp_id)
         try:
             home_score = int(g['teams']['home']['score'])
@@ -128,7 +135,7 @@ class Game(BaseModel):
             home_is_winner = None
 
         temp_id = int(g['venue']['id'])
-        Venue.update_table(temp_id)
+        Venue.update(temp_id)
         venue = Venue.objects.get(id=temp_id)
 
         double_header = g['doubleHeader']
