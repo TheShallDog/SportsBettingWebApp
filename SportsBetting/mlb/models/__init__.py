@@ -13,6 +13,7 @@ from .original import MlbBovadaUpcomingBatters
 from .original import MlbBovadaPitchersPostSimData
 from .original import MlbBovadaPitchersBetComparison
 
+from .base_model import BaseModel
 from .game import Game
 from .team import Team
 from .venue import Venue

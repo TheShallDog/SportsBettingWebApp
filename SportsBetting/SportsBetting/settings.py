@@ -77,7 +77,7 @@ WSGI_APPLICATION = 'SportsBetting.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'mlbdb',
+        'NAME': 'sports_data',
         'USER': 'postgres',
         'PASSWORD': 'slurpee',
         'HOST': 'localhost',
